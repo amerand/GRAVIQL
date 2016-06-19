@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import platform, sys, os
 if platform.uname()[1] == 'wvgoff':
+    # -- VLTI Offline Machine:
     sys.path.append('/diska/home/astrov/vltipso/python27/anaconda')
     sys.path = sys.path[::-1]
 
@@ -10,7 +11,6 @@ matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from astropy.io import fits
 import cPickle
-import scipy.special
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
 
 from PIL import ImageTk, Image
@@ -179,17 +179,6 @@ def slidingOp(x,y,dx):
         res['1sigma'][i] = (np.percentile(yp, 84)-np.percentile(yp, 16))/2
     return res
 
-def _Vud(base, diam, wavel):
-    """
-    Complex visibility of a uniform disk for parameters:
-    - base in m
-    - diam in mas
-    - wavel in um
-    """
-    x = 0.01523087098933543*diam*base/wavel
-    x += 1e-6*(x==0)
-    return 2*scipy.special.j1(x)/(x)
-
 __lbda, __tran = None, None
 def tellTrans(wl, width=2.3):
     global __lbda, __tran
@@ -245,9 +234,9 @@ class guiPlot(Tkinter.Frame):
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
             self.font = tkFont.Font(family='Consolas', size=10)
-        #if getpass.getuser()=='amerand':
-        #    # -- specific for Antoine Merand
-        #    self.font = tkFont.Font(family='monofur', size=13)
+        if getpass.getuser()=='amerand':
+           # -- specific for Antoine Merand
+           self.font = tkFont.Font(family='monofur', size=13)
         if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
@@ -343,7 +332,7 @@ class guiPlot(Tkinter.Frame):
         files = os.listdir(self.directory)
 
         files = filter(lambda x: (x.endswith('raw.fits') or x.endswith('calibrated.fits'))
-                    and x.startswith('GRAV') and '_vis' in x, files)
+                                  and x.startswith('GRAV') and '_vis' in x, files)
         files.sort()
         self.checkList = {}
 
