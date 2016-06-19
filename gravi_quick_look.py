@@ -324,7 +324,6 @@ class guiPlot(Tkinter.Frame):
         return
     def changeDir(self):
         self.directory = tkFileDialog.askdirectory(initialdir=self.directory)
-        print self.directory
         self.root.title('GRAVIQL '+self.directory)
 
         self.makeFileFrame()
@@ -354,7 +353,8 @@ class guiPlot(Tkinter.Frame):
 
         format = '%-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%% %3.0f%% %19s %5s'
         legend = '    Object     Prog ID     Contain.  Disp  Wollast  Baseline   Seei   Tau0   FT   SC    Date-Obs           LST '
-        #print '\n'+legend
+        print ''
+        print legend
         c = Tkinter.Label(self.listFrame, text='  '+legend, bg='gray30', fg='gray80', font=self.font)
         c.pack(fill='both')
         container = None
@@ -433,11 +433,10 @@ class guiPlot(Tkinter.Frame):
                      relief='flat', offrelief='flat', overrelief='flat',
                      highlightthickness=0,)
             colorsT = [('46', '36'), ('43', '33')]
-            # if 'sciraw' in key:
-            #     print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
-            # else:
-            #     print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
-
+            if 'sciraw' in key:
+                print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
+            else:
+                print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
 
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
