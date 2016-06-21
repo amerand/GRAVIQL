@@ -19,18 +19,45 @@ import Tkinter, tkFileDialog, tkMessageBox, tkFont
 #from PIL import ImageTk, Image
 import getpass
 
-def loadGraviMulti(filenames, insname='SPECTRO_SC'):
+def loadGraviMulti(filenames, insname='SPECTRO_SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
     if len(set([d['OB NAME'] for d in data]))!=1:
         return None
 
-    for o in ['V2', 'uvV2', 'T3', 'uvT3', 'VISPHI', 'uvVISPHI']:
+    for o in ['V2', 'uvV2', 'T3', 'uvT3', 'uvVISPHI']:
         for k in data[0][o].keys():
             for i in range(len(data)):
                 if i==0:
                     data[i][o][k] = np.array(data[i][o][k])/float(len(data))
                 else:
                     data[0][o][k] += np.array(data[i][o][k])/float(len(data))
+
+    # -- averaging differential phase, not phase
+    if wlmin is None or wlmin<data[0]['wl'].min():
+        wlmin = data[0]['wl'].min()
+    if wlmax is None or wlmax>data[0]['wl'].max():
+        wlmax = data[0]['wl'].max()
+
+    if (wlmax-wlmin)<data[0]['wl'].ptp()/3.:
+        # -- remove continuum, using sides as continnum
+        wc =  np.where( (data[0]['wl']<=wlmax)*(data[0]['wl']>=wlmin)*
+                    (np.abs(data[0]['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin)))
+    else:
+        wc = np.where(data[0]['wl'])
+    for o in ['VISPHI']:
+        for k in data[0][o].keys():
+            for i in range(len(data)):
+                tmp = data[i][o][k].copy()
+                tmp = (tmp+90)%180-90
+                cc = np.polyfit(data[0]['wl'][wc]-0.5*(wlmin+wlmax),
+                                tmp[wc], 1.)
+                print filenames[i], cc, tmp.mean()
+
+                if i==0:
+                    data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
+                else:
+                    data[0][o][k] += (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
+
     return data[0]
 
 def loadGravi(filename, insname='SPECTRO_SC'):
@@ -221,8 +248,247 @@ def getYlim(y):
     return np.median(y) - 1.5*(np.percentile(y,98)-np.percentile(y,2)),\
            np.median(y) + 1.5*(np.percentile(y,98)-np.percentile(y,2))
 
-_gray80 = '#AAAAAA'
-_gray30 = '#656565'
+
+def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
+              onlySpectrum=False, export=None):
+    top = 0
+    if isinstance(filename, list) or isinstance(filename, tuple):
+        r = loadGraviMulti(filename, insname)
+        if r is None:
+            return False
+        top = 0.025*(len(filename)-1)
+        filename = '\n'.join(filename)
+    else:
+        r = loadGravi(filename, insname)
+    if r is None:
+        return False
+    plt.close(0)
+    if onlySpectrum:
+        plt.figure(0, figsize=(15,5))
+    else:
+        plt.figure(0, figsize=(15,9))
+    plt.clf()
+    plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
+                                           r['OB NAME'], r['INSNAME']]))
+
+    if wlmin is None or wlmin<r['wl'].min():
+        wlmin = r['wl'].min()
+    if wlmax is None or wlmax>r['wl'].max():
+        wlmax = r['wl'].max()
+
+    w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
+    r['wl band'] = r['wl'][w]
+    if len(w[0])<len(r['wl'])/3:
+        computeDiff = True
+    else:
+        computeDiff = False
+
+    if onlySpectrum:
+        ax = plt.subplot(111)
+        plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
+                            wspace=0.1, bottom=0.15, top=0.9-top)
+    else:
+        ax = plt.subplot(5,3,1)
+        plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
+                            wspace=0.1, bottom=0.05, top=0.9-top)
+        plt.title('Spectrum and CP (deg % 180)')
+
+    tmp = 0
+    for T in r['FLUX'].keys():
+        tmp += r['FLUX'][T]/r['FLUX'][T].mean()/4.
+    # -- telluric
+    try:
+        tell = tellTrans(r['wl'][w]/1.00025, width=2.2 if r['SPEC RES']=='HIGH' else 1.2)
+    except:
+        print 'Warning, could not load telluric spectrum'
+        tell = np.ones(len(r['wl'][w]))
+
+    sli = slidingOp(r['wl'][w], tmp[w]-1, 0.05)
+    c = np.polyfit(r['wl'][w], sli['75%'], 3, w=1/sli['1sigma'])
+
+    tell *= 1+np.polyval(c, r['wl'][w])
+
+    if onlySpectrum:
+        plt.plot(r['wl'][w], tell, '-b', alpha=0.35,
+                 label='tell.+cont')#, linestyle='steps')
+        plt.plot(r['wl'][w], tmp[w], '-k', label='raw',
+                 alpha=0.2)#, linestyle='steps')
+    tmp[w]/=tell
+
+    plt.plot(r['wl'][w], tmp[w], '-k', label='spectr',
+             alpha=0.7, linewidth=1, linestyle='steps')
+    # -- remove continuum
+    wc =  np.where((r['wl']<=wlmax)*(r['wl']>=wlmin)*
+                   (np.abs(r['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin))  )
+
+    if computeDiff:
+        cc = np.polyfit(r['wl'][wc],tmp[wc],1)
+        r['spectrum band'] = tmp[w] - np.polyval(cc,r['wl'][w]) + 1
+    plt.ylim(getYlim(tmp[w]))
+
+    # -- spectral line database
+    lines = {#'HeI-II':[(2.058, 2.112, 2.1623, 2.166, 2.189), 'c'],
+             #'H2':((2.1218, 2.2235), 'm'),
+             #'MgII':((2.137, 2.1438), '0.5'),
+             #r'Br$\gamma$':[2.1661, 'b'],
+             #'NIII':[(2.247, 2.251), (0,1,0.5)],
+             #'FeI-II':((2.0635, 2.0846, 2.2263, 2.2389, 2.2479, 2.2626), 'g'),
+             #r'$^{12}$C$^{16}$O HB':([2.2935, 2.3227, 2.3535, 2.3829,2.4142], 'r'),
+             #r'$^{13}$C$^{16}$O HB':([2.3448, 2.3739, 2.4037, 2.4341,2.4971], 'orange'),
+             #'AlI':((2.109884,2.116958,2.270729),'b'),
+             #'MgI':((2.121393,2.146472,2.386573),'r'),
+             #'NaI':[(2.206242, 2.208969), 'y'],
+             #'ScI':((2.20581,2.20714),'m'),
+             #'SiI':((2.206873),'g')
+             #'CaI':((2.261410,2.263110,2.265741),'g')
+             }
+    for k in lines.keys():
+        plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
+                   linestyle='dashed', label=k)
+
+    plt.legend(loc='lower left', fontsize=7, ncol=2)
+    plt.hlines(1, wlmin, wlmax, linestyle='dotted')
+    if onlySpectrum:
+        plt.legend(loc='lower center', fontsize=11, ncol=10)
+        plt.xlabel('wavelength (um)')
+        plt.xlim(wlmin, wlmax)
+        plt.ylim(0, 1.05*tmp[w].max())
+        plt.show()
+        return
+    ax.xaxis.grid()
+
+    filt = False
+    if filt:
+        import d4
+    # -- V2 and visPHI ----
+    r['V2 band'] = {}
+    r['dV2 band'] = {}
+    r['dPHI band'] = {}
+    for i,B in enumerate(r['V2'].keys()):
+        axv = plt.subplot(6,3,3+3*i, sharex=ax)
+        if i==0:
+            plt.title('V2')
+
+        # -- filter negative measurements:
+        for j in np.where(r['V2'][B]<=0)[0]:
+            r['V2'][B][j] = np.median(r['V2'][B][max(j-7, 0):
+                                                min(j+7, len(r['V2'][B])-1)])
+
+        if r['SPEC RES']=='HIGH' and filt:
+            spr = r['V2'][B][w]
+            # -- sigma clipping
+            #tmp = slidingOp(r['wl'][w], spr, 0.05)
+            #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
+            #spr[w_] = tmp['median'][w_]
+            plt.plot(r['wl'][w], d4.filter1D(spr, [1,0.9,0.7,0.4,0], order=2),
+                    '-', color=(0.8,0.5,0.1))
+            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.22, linewidth=1,label=B)
+        else:
+            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
+                     linestyle='steps')
+            r['V2 band'][B] = r['V2'][B][w]
+            if computeDiff:
+                cc = np.polyfit(r['wl'][wc],r['V2'][B][wc],1)
+                r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
+
+        for k in lines.keys():
+            plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
+                       linestyle='dashed')
+        tmp = getYlim(r['V2'][B][w])
+        plt.ylim(max(tmp[0], 0), tmp[1])
+        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        axv.xaxis.grid()
+        # -- visphi
+        axp = plt.subplot(6,3,2+3*i, sharex=ax)
+        if i==0:
+            plt.title('Diff Phase (deg)')
+        if computeDiff:
+            cc = np.polyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
+        else:
+            cc = np.polyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
+        r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
+        if r['SPEC RES']=='HIGH' and filt:
+            spr = r['VISPHI'][B][w]
+            # -- sigma clipping
+            #tmp = slidingOp(r['wl'][w], spr, 0.05)
+            #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
+            #spr[w_] = tmp['median'][w_]
+            spr = d4.filter1D(spr, [0,1,0.9,0.7,0.4,0], order=2)
+            plt.plot(r['wl'][w], spr, '-', color=(0.8,0.5,0.1))
+            plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]),
+                     '-k', alpha=0.22, linewidth=1, label=B)
+            plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]) ))
+        else:
+            plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
+                     '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+            plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
+
+        plt.hlines(0, wlmin, wlmax, linestyle='dotted')
+        for k in lines.keys():
+            plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
+                       linestyle='dashed')
+        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        axp.xaxis.grid()
+    axv.set_xlabel('wavelength (um)')
+    axp.set_xlabel('wavelength (um)')
+    # -- T3 ----
+    r['CP band'] = {}
+    r['dCP band'] = {}
+    for i,B in enumerate(r['T3'].keys()):
+        axx = plt.subplot(5,3,4+3*i, sharex=ax)
+
+        if True:
+            tmp = r['T3'][B]
+        else:
+            tmp = (r['T3'][B]+90)%180-90
+            wr = r['T3'][B][w]<=-90.0
+            if wr[0].sum():
+                plt.plot(r['wl'][w][wr], tmp[w][wr], '.r', alpha=0.5,
+                         label='<-90')
+                wb = r['T3'][B][w]>=90.0
+            if wb[0].sum():
+                plt.plot(r['wl'][w][wb], tmp[w][wb], '.b', alpha=0.5,
+                         label='>90')
+
+        if r['SPEC RES']=='HIGH' and filt:
+            s, c = np.sin(np.pi*r['T3'][B]/180), np.cos(np.pi*r['T3'][B]/180)
+            # -- sigma clipping
+            #ts, tc = slidingOp(r['wl'], s, 0.05), slidingOp(r['wl'], c, 0.05)
+            #w_ = np.where(np.abs(s-ts['median'])>3*ts['1sigma'])
+            #s[w_] = ts['median'][w_]
+            #w_ = np.where(np.abs(s-tc['median'])>3*tc['1sigma'])
+            #c[w_] = tc['median'][w_]
+            s = d4.filter1D(s, [1,1,1,0.7,0.2,0], order=2)[w]
+            c = d4.filter1D(c, [1,1,1,0.7,0.2,0], order=2)[w]
+            a = np.arctan2(s,c)*180/np.pi
+            a = (a+90)%180-90
+            plt.plot(r['wl'][w], a, '-', color=(0.8,0.5,0.1))
+            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.22, linewidth=1, label=B)
+        else:
+            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
+                     linestyle='steps')
+        r['CP band'][B] = tmp[w]
+        if computeDiff:
+            cc = np.polyfit(r['wl'][wc], tmp[wc],1)
+            r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
+
+        plt.ylim(getYlim(tmp[w]))
+        plt.hlines(0, wlmin, wlmax, linestyle='dotted')
+        for k in lines.keys():
+            plt.vlines(lines[k][0], -150 , 150, color=lines[k][1],
+                       linestyle='dashed')
+
+        axx.xaxis.grid()
+        plt.legend(loc='upper left', fontsize=8, ncol=1)
+    plt.xlabel('wavelength (um)')
+    plt.xlim(wlmin, wlmax)
+    plt.show()
+    return r
+
+
+
+_gray80 = '#BBBBBB'
+_gray30 = '#444444'
 _crimson = '#DC143C'
 _myblue = '#224488'
 _myorange = '#886622'
@@ -486,241 +752,6 @@ class guiPlot(Tkinter.Frame):
             tkMessageBox.showerror('ERROR', 'Incorrect file(s) selection')
         return
 
-def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
-              onlySpectrum=False, export=None):
-    top = 0
-    if isinstance(filename, list) or isinstance(filename, tuple):
-        r = loadGraviMulti(filename, insname)
-        if r is None:
-            return False
-        top = 0.025*(len(filename)-1)
-        filename = '\n'.join(filename)
-    else:
-        r = loadGravi(filename, insname)
-    if r is None:
-        return False
-    plt.close(0)
-    if onlySpectrum:
-        plt.figure(0, figsize=(15,5))
-    else:
-        plt.figure(0, figsize=(15,9))
-    plt.clf()
-    plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
-                                           r['OB NAME'], r['INSNAME']]))
-
-    if wlmin is None or wlmin<r['wl'].min():
-        wlmin = r['wl'].min()
-    if wlmax is None or wlmax>r['wl'].max():
-        wlmax = r['wl'].max()
-
-    w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
-    r['wl band'] = r['wl'][w]
-    if len(w[0])<len(r['wl'])/3:
-        computeDiff = True
-    else:
-        computeDiff = False
-
-    if onlySpectrum:
-        ax = plt.subplot(111)
-        plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                            wspace=0.1, bottom=0.15, top=0.9-top)
-    else:
-        ax = plt.subplot(5,3,1)
-        plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                            wspace=0.1, bottom=0.05, top=0.9-top)
-        plt.title('Spectrum and CP (deg % 180)')
-
-    tmp = 0
-    for T in r['FLUX'].keys():
-        tmp += r['FLUX'][T]/r['FLUX'][T].mean()/4.
-    # -- telluric
-    try:
-        tell = tellTrans(r['wl'][w]/1.00025, width=2.2 if r['SPEC RES']=='HIGH' else 1.2)
-    except:
-        print 'Warning, could not load telluric spectrum'
-        tell = np.ones(len(r['wl'][w]))
-
-    sli = slidingOp(r['wl'][w], tmp[w]-1, 0.05)
-    c = np.polyfit(r['wl'][w], sli['75%'], 3, w=1/sli['1sigma'])
-
-    tell *= 1+np.polyval(c, r['wl'][w])
-
-    if onlySpectrum:
-        plt.plot(r['wl'][w], tell, '-b', alpha=0.35,
-                 label='tell.+cont')#, linestyle='steps')
-        plt.plot(r['wl'][w], tmp[w], '-k', label='raw',
-                 alpha=0.2)#, linestyle='steps')
-    tmp[w]/=tell
-
-    plt.plot(r['wl'][w], tmp[w], '-k', label='spectr',
-             alpha=0.7, linewidth=1, linestyle='steps')
-    # -- remove continuum
-    wc =  np.where((r['wl']<=wlmax)*(r['wl']>=wlmin)*
-                   (np.abs(r['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin))  )
-
-    if computeDiff:
-        cc = np.polyfit(r['wl'][wc],tmp[wc],1)
-        r['spectrum band'] = tmp[w] - np.polyval(cc,r['wl'][w]) + 1
-    plt.ylim(getYlim(tmp[w]))
-
-    # -- spectral line database
-    lines = {#'HeI-II':[(2.058, 2.112, 2.1623, 2.166, 2.189), 'c'],
-             #'H2':((2.1218, 2.2235), 'm'),
-             #'MgII':((2.137, 2.1438), '0.5'),
-             #r'Br$\gamma$':[2.1661, 'b'],
-             #'NIII':[(2.247, 2.251), (0,1,0.5)],
-             #'FeI-II':((2.0635, 2.0846, 2.2263, 2.2389, 2.2479, 2.2626), 'g'),
-             #r'$^{12}$C$^{16}$O HB':([2.2935, 2.3227, 2.3535, 2.3829,2.4142], 'r'),
-             #r'$^{13}$C$^{16}$O HB':([2.3448, 2.3739, 2.4037, 2.4341,2.4971], 'orange'),
-             #'AlI':((2.109884,2.116958,2.270729),'b'),
-             #'MgI':((2.121393,2.146472,2.386573),'r'),
-             #'NaI':[(2.206242, 2.208969), 'y'],
-             #'ScI':((2.20581,2.20714),'m'),
-             #'SiI':((2.206873),'g')
-             #'CaI':((2.261410,2.263110,2.265741),'g')
-             }
-    for k in lines.keys():
-        plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
-                   linestyle='dashed', label=k)
-
-    plt.legend(loc='lower left', fontsize=7, ncol=2)
-    plt.hlines(1, wlmin, wlmax, linestyle='dotted')
-    if onlySpectrum:
-        plt.legend(loc='lower center', fontsize=11, ncol=10)
-        plt.xlabel('wavelength (um)')
-        plt.xlim(wlmin, wlmax)
-        plt.ylim(0, 1.05*tmp[w].max())
-        plt.show()
-        return
-    ax.xaxis.grid()
-
-    filt = False
-    if filt:
-        import d4
-    # -- V2 and visPHI ----
-    r['V2 band'] = {}
-    r['dV2 band'] = {}
-    r['dPHI band'] = {}
-    for i,B in enumerate(r['V2'].keys()):
-        axv = plt.subplot(6,3,3+3*i, sharex=ax)
-        if i==0:
-            plt.title('V2')
-
-        # -- filter negative measurements:
-        for j in np.where(r['V2'][B]<=0)[0]:
-            r['V2'][B][j] = np.median(r['V2'][B][max(j-7, 0):
-                                                min(j+7, len(r['V2'][B])-1)])
-
-        if r['SPEC RES']=='HIGH' and filt:
-            spr = r['V2'][B][w]
-            # -- sigma clipping
-            #tmp = slidingOp(r['wl'][w], spr, 0.05)
-            #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
-            #spr[w_] = tmp['median'][w_]
-            plt.plot(r['wl'][w], d4.filter1D(spr, [1,0.9,0.7,0.4,0], order=2),
-                    '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.22, linewidth=1,label=B)
-        else:
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
-                     linestyle='steps')
-            r['V2 band'][B] = r['V2'][B][w]
-            if computeDiff:
-                cc = np.polyfit(r['wl'][wc],r['V2'][B][wc],1)
-                r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
-
-        for k in lines.keys():
-            plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
-                       linestyle='dashed')
-        tmp = getYlim(r['V2'][B][w])
-        plt.ylim(max(tmp[0], 0), tmp[1])
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
-        axv.xaxis.grid()
-        # -- visphi
-        axp = plt.subplot(6,3,2+3*i, sharex=ax)
-        if i==0:
-            plt.title('Diff Phase (deg)')
-        if computeDiff:
-            cc = np.polyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
-        else:
-            cc = np.polyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
-        r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
-        if r['SPEC RES']=='HIGH' and filt:
-            spr = r['VISPHI'][B][w]
-            # -- sigma clipping
-            #tmp = slidingOp(r['wl'][w], spr, 0.05)
-            #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
-            #spr[w_] = tmp['median'][w_]
-            spr = d4.filter1D(spr, [0,1,0.9,0.7,0.4,0], order=2)
-            plt.plot(r['wl'][w], spr, '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]),
-                     '-k', alpha=0.22, linewidth=1, label=B)
-            plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]) ))
-        else:
-            plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
-                     '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
-            plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
-
-        plt.hlines(0, wlmin, wlmax, linestyle='dotted')
-        for k in lines.keys():
-            plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
-                       linestyle='dashed')
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
-        axp.xaxis.grid()
-    axv.set_xlabel('wavelength (um)')
-    axp.set_xlabel('wavelength (um)')
-    # -- T3 ----
-    r['CP band'] = {}
-    r['dCP band'] = {}
-    for i,B in enumerate(r['T3'].keys()):
-        axx = plt.subplot(5,3,4+3*i, sharex=ax)
-
-        if True:
-            tmp = r['T3'][B]
-        else:
-            tmp = (r['T3'][B]+90)%180-90
-            wr = r['T3'][B][w]<=-90.0
-            if wr[0].sum():
-                plt.plot(r['wl'][w][wr], tmp[w][wr], '.r', alpha=0.5,
-                         label='<-90')
-                wb = r['T3'][B][w]>=90.0
-            if wb[0].sum():
-                plt.plot(r['wl'][w][wb], tmp[w][wb], '.b', alpha=0.5,
-                         label='>90')
-
-        if r['SPEC RES']=='HIGH' and filt:
-            s, c = np.sin(np.pi*r['T3'][B]/180), np.cos(np.pi*r['T3'][B]/180)
-            # -- sigma clipping
-            #ts, tc = slidingOp(r['wl'], s, 0.05), slidingOp(r['wl'], c, 0.05)
-            #w_ = np.where(np.abs(s-ts['median'])>3*ts['1sigma'])
-            #s[w_] = ts['median'][w_]
-            #w_ = np.where(np.abs(s-tc['median'])>3*tc['1sigma'])
-            #c[w_] = tc['median'][w_]
-            s = d4.filter1D(s, [1,1,1,0.7,0.2,0], order=2)[w]
-            c = d4.filter1D(c, [1,1,1,0.7,0.2,0], order=2)[w]
-            a = np.arctan2(s,c)*180/np.pi
-            a = (a+90)%180-90
-            plt.plot(r['wl'][w], a, '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.22, linewidth=1, label=B)
-        else:
-            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
-                     linestyle='steps')
-        r['CP band'][B] = tmp[w]
-        if computeDiff:
-            cc = np.polyfit(r['wl'][wc], tmp[wc],1)
-            r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
-
-        plt.ylim(getYlim(tmp[w]))
-        plt.hlines(0, wlmin, wlmax, linestyle='dotted')
-        for k in lines.keys():
-            plt.vlines(lines[k][0], -150 , 150, color=lines[k][1],
-                       linestyle='dashed')
-
-        axx.xaxis.grid()
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
-    plt.xlabel('wavelength (um)')
-    plt.xlim(wlmin, wlmax)
-    plt.show()
-    return r
 
 if __name__=='__main__':
     root = Tkinter.Tk()
