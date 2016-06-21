@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+import warnings
+warnings.filterwarnings('ignore')
+
 import platform, sys, os
 if platform.uname()[1] == 'wvgoff':
     # -- VLTI Offline Machine:
@@ -13,7 +16,7 @@ from astropy.io import fits
 import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
 
-from PIL import ImageTk, Image
+#from PIL import ImageTk, Image
 import getpass
 
 def loadGraviMulti(filenames, insname='SPECTRO_SC'):
@@ -218,6 +221,13 @@ def getYlim(y):
     return np.median(y) - 1.5*(np.percentile(y,98)-np.percentile(y,2)),\
            np.median(y) + 1.5*(np.percentile(y,98)-np.percentile(y,2))
 
+_gray80 = '#AAAAAA'
+_gray30 = '#656565'
+_crimson = '#DC143C'
+_myblue = '#224488'
+_myorange = '#886622'
+_myLightblue = '#44BBFF'
+_myLightorange = '#FFBB44'
 class guiPlot(Tkinter.Frame):
     def __init__(self,root, directory=None):
         self.root = root
@@ -248,33 +258,38 @@ class guiPlot(Tkinter.Frame):
         quit()
 
     def makeMainFrame(self):
-        self.mainFrame = Tkinter.Frame.__init__(self, self.root, bg='gray30')
-        self.waveFrame = Tkinter.Frame(self.mainFrame, bg='gray30')
-        self.actFrame = Tkinter.Frame(self.mainFrame, bg='gray30')
+        self.mainFrame = Tkinter.Frame.__init__(self, self.root, bg=_gray30)
+        self.waveFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
+        self.actFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.listFrame = None
         self.root.title('GRAVIQL '+self.directory)
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
         b = Tkinter.Button(self.actFrame, text='Show CP, dPhi, V2', font=self.font,
                            command = self.quickViewAll)
-        b.pack(**bo); b.config(bg='gray80', fg='#224488')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
         b = Tkinter.Button(self.actFrame, text='Show Spectrum',  font=self.font,
                            command= self.quickViewSpctr)
-        b.pack(**bo); b.config(bg='gray80', fg='#224488')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'right'}
+        # b = Tkinter.Label(self.actFrame, text='https://github.com/amerand/GRAVIQL',
+        #                     font=self.font,justify='center', anchor='center')
+        # bo['side'] = 'left'
+        # b.pack(**bo); b.config(bg=_gray80, fg='#224488')
+
+        bo['side'] = 'right'
         b = Tkinter.Button(self.actFrame, text='QUIT',  font=self.font,
                            command= self.quit)
-        b.pack(**bo); b.config(bg='Crimson', fg='black')
+        b.pack(**bo); b.config(bg=_crimson, fg='#000000')
 
         b = Tkinter.Button(self.actFrame, text='Change Directory', font=self.font,
                            command= self.changeDir)
-        b.pack(**bo); b.config(bg='gray80', fg='#886600')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
         b = Tkinter.Button(self.actFrame, text='Reload Files', font=self.font,
                            command= self.makeFileFrame)
-        b.pack(**bo); b.config(bg='gray80', fg='#886600')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
         modes = [('Full Range',  'None None'),
                  ('High SNR',  '2.05 2.42'),
@@ -296,19 +311,16 @@ class guiPlot(Tkinter.Frame):
                                 value=mode, font=self.font,
                                 indicatoron=0)
             b.pack(**bo)
-            b.config(selectcolor='Dark goldenrod', fg='gray80', bg='gray30')
+            b.config(selectcolor=_myorange, fg=_gray80, bg=_gray30)
         bo = {'fill':'both', 'side':'right', 'padx':0, 'pady':1}
         b = Tkinter.Label(self.waveFrame, text='um',
-                          bg='gray30', fg='gray90', font=self.font)
+                          bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
         b = Tkinter.Entry(self.waveFrame, textvariable=self.wlrange,
                           width=12, font=self.font)
         b.pack(**bo)
-        b.config(bg='gray30', fg='gray90')
-        #b = Tkinter.Label(self.waveFrame, text='WL',
-        #                  bg='gray90', fg='gray20', font=self.font)
-        #b.pack(**bo)
+        b.config(bg=_gray30, fg=_gray80)
         self.makeFileFrame()
         return
     def changeDir(self):
@@ -326,7 +338,7 @@ class guiPlot(Tkinter.Frame):
                 self.listFrame.destroy()
                 self.listFrame.pack_forget()
 
-        self.listFrame = Tkinter.Frame(self.mainFrame, bg='gray30')
+        self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         # -- list all files
         self.filename = None
         files = os.listdir(self.directory)
@@ -344,16 +356,16 @@ class guiPlot(Tkinter.Frame):
         legend = '    Object     Prog ID     Contain.  Disp  Wollast  Baseline   Seei   Tau0   FT   SC    Date-Obs           LST '
         print ''
         print legend
-        c = Tkinter.Label(self.listFrame, text='  '+legend, bg='gray30', fg='gray80', font=self.font)
+        c = Tkinter.Label(self.listFrame, text='  '+legend, bg=_gray30, fg=_gray80, font=self.font)
         c.pack(fill='both')
         container = None
 
-        BG = [ ('#226688', 'gray80'),
-               ('#886622', 'gray80') ]
-        ABG = [('#44BBFF', 'gray40'),
-               ('#FFBB44', 'gray40') ]
-        FG = [('gray90', '#226688'),
-              ('gray90', '#886622') ]
+        BG = [ (_myblue, _gray80),
+               (_myorange, _gray80) ]
+        ABG = [(_myLightblue, _gray30),
+               (_myLightorange, _gray30) ]
+        FG = [(_gray80, _myblue),
+              (_gray80, _myorange) ]
         ic = -1
         container = -1
         for fi in files:
@@ -410,7 +422,7 @@ class guiPlot(Tkinter.Frame):
             c = Tkinter.Checkbutton(self.listFrame, text=text,
                                     variable=self. checkList[key],
                                     onvalue=1, offvalue=0, font=self.font)
-            c.pack(fill='both')
+            c.pack(fill='both', side='top')
             c.config(justify='left',
                      foreground =FG[ic%2][0] if 'sciraw' in key else FG[ic%2][1],
                      selectcolor=BG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
@@ -712,7 +724,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
 
 if __name__=='__main__':
     root = Tkinter.Tk()
-    root.config(bg='gray30')
+    root.config(bg=_gray30)
     if len(sys.argv)==1:
         directory = tkFileDialog.askdirectory()
     else:
