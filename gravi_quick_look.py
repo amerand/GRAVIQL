@@ -19,7 +19,7 @@ import Tkinter, tkFileDialog, tkMessageBox, tkFont
 #from PIL import ImageTk, Image
 import getpass
 
-def loadGraviMulti(filenames, insname='SPECTRO_SC', wlmin=None, wlmax=None):
+def loadGraviMulti(filenames, insname='SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
     if len(set([d['OB NAME'] for d in data]))!=1:
         return None
@@ -51,7 +51,7 @@ def loadGraviMulti(filenames, insname='SPECTRO_SC', wlmin=None, wlmax=None):
                 tmp = (tmp+90)%180-90
                 cc = np.polyfit(data[0]['wl'][wc]-0.5*(wlmin+wlmax),
                                 tmp[wc], 1.)
-                print filenames[i], cc, tmp.mean()
+                #print filenames[i], cc, tmp.mean()
 
                 if i==0:
                     data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
@@ -60,7 +60,7 @@ def loadGraviMulti(filenames, insname='SPECTRO_SC', wlmin=None, wlmax=None):
 
     return data[0]
 
-def loadGravi(filename, insname='SPECTRO_SC'):
+def loadGravi(filename, insname='SC'):
     f = fits.open(filename)
     res = {}
     insnames = []
@@ -76,7 +76,10 @@ def loadGravi(filename, insname='SPECTRO_SC'):
     res['SPEC RES'] = f[0].header['ESO INS SPEC RES']
     res['POLA'] = f[0].header['ESO INS POLA MODE']
     if insname=='auto':
-        insname = 'SPECTRO_SC'+('' if res['POLA']=='COMBINED' else '_P')
+        insname = 'SC'+('' if res['POLA']=='COMBINED' else '_P')
+        diffPola = True
+    else:
+        diffPola = False
     res['INSNAME'] = insname
     # -- wavelength: ----
     for h in f:
@@ -86,7 +89,7 @@ def loadGravi(filename, insname='SPECTRO_SC'):
                 res['wl'] = h.data['EFF_WAVE']*1e6
             insnames.append(h.header['INSNAME'])
     if not 'wl' in res.keys():
-        #print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
+        print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
         return
 
     # -- oi array: ----
@@ -188,6 +191,46 @@ def loadGravi(filename, insname='SPECTRO_SC'):
                     for i in range(4):
                          k = oiarray[h.data['STA_INDEX'][i]]
                          res['FLUX'][k] = res['FLUX'][k]/2. + h.data['FLUX'][i]/2
+
+    if diffPola and res['POLA']=='SPLIT':
+        p1 = 'SC_P1' if 'SC' in insname else 'FT_P1'
+        p2 = 'SC_P2' if 'SC' in insname else 'FT_P2'
+        # -- differential phase
+        for i, h in enumerate(f):
+            if 'EXTNAME' in h.header.keys() and \
+                    h.header['EXTNAME'] == 'OI_VIS' \
+                    and p1 in h.header['INSNAME']:
+                i1 = i
+            if 'EXTNAME' in h.header.keys() and \
+                    h.header['EXTNAME'] == 'OI_VIS' \
+                    and p2 in h.header['INSNAME']:
+                i2 = i
+        res['VISPHI_P1'] = {}
+        res['VISPHI_P2'] = {}
+        for i in range(6):
+                k = oiarray[f[i1].data['STA_INDEX'][i][0]]+\
+                    oiarray[f[i1].data['STA_INDEX'][i][1]]
+                res['VISPHI_P1'][k] = f[i1].data['VISPHI'][i].copy()
+                res['VISPHI_P2'][k] = f[i2].data['VISPHI'][i].copy()
+        # -- differential CP:
+        for i, h in enumerate(f):
+            if 'EXTNAME' in h.header.keys() and \
+                    h.header['EXTNAME'] == 'OI_T3' \
+                    and p1 in h.header['INSNAME']:
+                i1 = i
+            if 'EXTNAME' in h.header.keys() and \
+                    h.header['EXTNAME'] == 'OI_T3' \
+                    and p2 in h.header['INSNAME']:
+                i2 = i
+        res['T3_P1'] = {}
+        res['T3_P2'] = {}
+        for i in range(4):
+                k = oiarray[f[i1].data['STA_INDEX'][i][0]]+\
+                    oiarray[f[i1].data['STA_INDEX'][i][1]]+\
+                    oiarray[f[i1].data['STA_INDEX'][i][2]]
+                res['T3_P1'][k] = f[i1].data['T3PHI'][i].copy()
+                res['T3_P2'][k] = f[i2].data['T3PHI'][i].copy()
+
 
     f.close()
     return res
@@ -398,6 +441,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         plt.ylim(max(tmp[0], 0), tmp[1])
         plt.legend(loc='upper left', fontsize=8, ncol=1)
         axv.xaxis.grid()
+
         # -- visphi
         axp = plt.subplot(6,3,2+3*i, sharex=ax)
         if i==0:
@@ -419,15 +463,20 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                      '-k', alpha=0.22, linewidth=1, label=B)
             plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]) ))
         else:
-            plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
+            plt.plot(r['wl'][w], r['VISPHI'][B][w],#- np.polyval(cc, r['wl'][w]),
                      '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
             plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
+        if 'VISPHI_P1' in r.keys():
+            plt.plot(r['wl'][w], r['VISPHI_P1'][B][w], '-r', label='P1', alpha=0.5)
+        if 'VISPHI_P2' in r.keys():
+            plt.plot(r['wl'][w], r['VISPHI_P2'][B][w], '-b', label='P2', alpha=0.5)
+
 
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
         for k in lines.keys():
             plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
                        linestyle='dashed')
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        plt.legend(loc='upper left', fontsize=8, ncol=3)
         axp.xaxis.grid()
     axv.set_xlabel('wavelength (um)')
     axp.set_xlabel('wavelength (um)')
@@ -467,9 +516,16 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
                      linestyle='steps')
+
+        if 'T3_P1' in r.keys():
+            plt.plot(r['wl'][w], r['T3_P1'][B][w], '-r', label='P1', alpha=0.5)
+        if 'T3_P2' in r.keys():
+            plt.plot(r['wl'][w], r['T3_P2'][B][w], '-b', label='P2', alpha=0.5)
+
+
         r['CP band'][B] = tmp[w]
         if computeDiff:
-            cc = np.polyfit(r['wl'][wc], tmp[wc],1)
+            cc = np.polyfit(r['wl'][wc], tmp[wc], 3)
             r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
 
         plt.ylim(getYlim(tmp[w]))
@@ -485,8 +541,6 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
     plt.show()
     return r
 
-
-
 _gray80 = '#BBBBBB'
 _gray30 = '#444444'
 _crimson = '#DC143C'
@@ -498,7 +552,7 @@ class guiPlot(Tkinter.Frame):
     def __init__(self,root, directory=None):
         self.root = root
         if directory is None:
-            self.directory = './'
+            self.changeDir()
         else:
             self.directory = directory
         self.root = root
@@ -509,10 +563,10 @@ class guiPlot(Tkinter.Frame):
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
-            self.font = tkFont.Font(family='Consolas', size=10)
-        if getpass.getuser()=='amerand':
-           # -- specific for Antoine Merand
-           self.font = tkFont.Font(family='monofur', size=13)
+            self.font = tkFont.Font(family='courier', size=11)
+        # if getpass.getuser()=='amerand':
+        #    # -- specific for Antoine Merand
+        #    self.font = tkFont.Font(family='Menlo', size=13)
         if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
@@ -590,10 +644,11 @@ class guiPlot(Tkinter.Frame):
         self.makeFileFrame()
         return
     def changeDir(self):
+        self.root.update()
         self.directory = tkFileDialog.askdirectory(initialdir=self.directory)
         self.root.title('GRAVIQL '+self.directory)
-
         self.makeFileFrame()
+        self.root.update()
         return
 
     def makeFileFrame(self):
@@ -618,12 +673,14 @@ class guiPlot(Tkinter.Frame):
             c = Tkinter.Label(self.listFrame, text='no GRAV*vis*raw.fits files')
             c.pack(fill='both')
 
-        format = '%-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%% %3.0f%% %19s %5s'
-        legend = '    Object     Prog ID     Contain.  Disp  Wollast  Baseline   Seei   Tau0   FT   SC    Date-Obs           LST '
+        format = '%-24s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
+#                'HD151925             60.A-9256(A)     -999 MEDIUM    SPLIT A0-G1-J2-J3 1.36"  1.9ms  87%, 2.2ms  70% 2016-08-19T00:24:48 17:34'
+        legend = '      Object             Prog ID      Contain. Disp   Woll     Baseline    ASM:See T0@V   FT(T0@K)   SC       Date-Obs       LST  '
         print ''
         print legend
         c = Tkinter.Label(self.listFrame, text='  '+legend, bg=_gray30, fg=_gray80, font=self.font)
-        c.pack(fill='both')
+        c.pack()#fill='both')
+        c.config(justify='left')
         container = None
 
         BG = [ (_myblue, _gray80),
@@ -655,7 +712,11 @@ class guiPlot(Tkinter.Frame):
             # -- QC fringe tracker:
             FT = []
             SC = []
+            T0 = []
             for b in ['12','13','14','23','24','34']:
+                _key = 'ESO QC TAU0 OPDC'+b
+                if _key in f[0].header.keys():
+                    T0.append(1000*f[0].header[_key])
                 _key = 'ESO QC ACCEPTED_RATIO_FT%s_P1'%b
                 if _key in f[0].header.keys():
                     FT.append(f[0].header[_key])
@@ -680,7 +741,7 @@ class guiPlot(Tkinter.Frame):
                            f[0].header['ESO INS SPEC RES'],
                            f[0].header['ESO INS POLA MODE'],
                            baseline, seeing, tau0,
-                           np.median(FT), np.median(SC),
+                           np.median(FT), np.median(T0), np.median(SC),
                            f[0].header['DATE-OBS'],
                            lst)
 
@@ -704,7 +765,6 @@ class guiPlot(Tkinter.Frame):
                 print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
             else:
                 print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
-
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
         self.listFrame.pack()
