@@ -19,9 +19,10 @@ import Tkinter, tkFileDialog, tkMessageBox, tkFont
 #from PIL import ImageTk, Image
 import getpass
 
-def loadGraviMulti(filenames, insname='SC', wlmin=None, wlmax=None):
+def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
-    if len(set([d['OB NAME'] for d in data]))!=1:
+    # check if all observations done for sma object in spectro same mode
+    if len(set([d['TARG NAME']+d['SPEC RES']+d['POLA']+d['BASELINE'] for d in data]))!=1:
         return None
 
     for o in ['V2', 'uvV2', 'T3', 'uvT3', 'uvVISPHI']:
@@ -52,7 +53,6 @@ def loadGraviMulti(filenames, insname='SC', wlmin=None, wlmax=None):
                 cc = np.polyfit(data[0]['wl'][wc]-0.5*(wlmin+wlmax),
                                 tmp[wc], 1.)
                 #print filenames[i], cc, tmp.mean()
-
                 if i==0:
                     data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
                 else:
@@ -60,7 +60,7 @@ def loadGraviMulti(filenames, insname='SC', wlmin=None, wlmax=None):
 
     return data[0]
 
-def loadGravi(filename, insname='SC'):
+def loadGravi(filename, insname='GRAVITY_SC'):
     f = fits.open(filename)
     res = {}
     insnames = []
@@ -69,17 +69,20 @@ def loadGravi(filename, insname='SC'):
         res['DIAM'] = f[0].header['ESO INS SOBJ DIAMETER']
     else:
         res['DIAM'] = f[0].header['ESO FT ROBJ DIAMETER']
+    res['TARG NAME'] = f[0].header['ESO INS SOBJ NAME']
     res['OB NAME'] = f[0].header['ESO OBS NAME']
     res['PI'] = f[0].header['ESO OBS PI-COI NAME']
     res['OBS ID'] = f[0].header['ESO OBS ID']
     res['PROG ID'] = f[0].header['ESO OBS PROG ID']
     res['SPEC RES'] = f[0].header['ESO INS SPEC RES']
     res['POLA'] = f[0].header['ESO INS POLA MODE']
+    res['BASELINE']= '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
     if insname=='auto':
-        insname = 'SC'+('' if res['POLA']=='COMBINED' else '_P')
-        diffPola = True
-    else:
-        diffPola = False
+        if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
+           '0.7' in f[0].header['ESO PRO REC1 PIPE ID']:
+            insname = 'SPECTRO_SC'+('' if res['POLA']=='COMBINED' else '_P')
+        else:
+            insname = 'GRAVITY_SC'+('' if res['POLA']=='COMBINED' else '_P')
     res['INSNAME'] = insname
     # -- wavelength: ----
     for h in f:
@@ -89,7 +92,7 @@ def loadGravi(filename, insname='SC'):
                 res['wl'] = h.data['EFF_WAVE']*1e6
             insnames.append(h.header['INSNAME'])
     if not 'wl' in res.keys():
-        print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
+        #print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
         return
 
     # -- oi array: ----
@@ -191,46 +194,6 @@ def loadGravi(filename, insname='SC'):
                     for i in range(4):
                          k = oiarray[h.data['STA_INDEX'][i]]
                          res['FLUX'][k] = res['FLUX'][k]/2. + h.data['FLUX'][i]/2
-
-    if diffPola and res['POLA']=='SPLIT':
-        p1 = 'SC_P1' if 'SC' in insname else 'FT_P1'
-        p2 = 'SC_P2' if 'SC' in insname else 'FT_P2'
-        # -- differential phase
-        for i, h in enumerate(f):
-            if 'EXTNAME' in h.header.keys() and \
-                    h.header['EXTNAME'] == 'OI_VIS' \
-                    and p1 in h.header['INSNAME']:
-                i1 = i
-            if 'EXTNAME' in h.header.keys() and \
-                    h.header['EXTNAME'] == 'OI_VIS' \
-                    and p2 in h.header['INSNAME']:
-                i2 = i
-        res['VISPHI_P1'] = {}
-        res['VISPHI_P2'] = {}
-        for i in range(6):
-                k = oiarray[f[i1].data['STA_INDEX'][i][0]]+\
-                    oiarray[f[i1].data['STA_INDEX'][i][1]]
-                res['VISPHI_P1'][k] = f[i1].data['VISPHI'][i].copy()
-                res['VISPHI_P2'][k] = f[i2].data['VISPHI'][i].copy()
-        # -- differential CP:
-        for i, h in enumerate(f):
-            if 'EXTNAME' in h.header.keys() and \
-                    h.header['EXTNAME'] == 'OI_T3' \
-                    and p1 in h.header['INSNAME']:
-                i1 = i
-            if 'EXTNAME' in h.header.keys() and \
-                    h.header['EXTNAME'] == 'OI_T3' \
-                    and p2 in h.header['INSNAME']:
-                i2 = i
-        res['T3_P1'] = {}
-        res['T3_P2'] = {}
-        for i in range(4):
-                k = oiarray[f[i1].data['STA_INDEX'][i][0]]+\
-                    oiarray[f[i1].data['STA_INDEX'][i][1]]+\
-                    oiarray[f[i1].data['STA_INDEX'][i][2]]
-                res['T3_P1'][k] = f[i1].data['T3PHI'][i].copy()
-                res['T3_P2'][k] = f[i2].data['T3PHI'][i].copy()
-
 
     f.close()
     return res
@@ -441,7 +404,6 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         plt.ylim(max(tmp[0], 0), tmp[1])
         plt.legend(loc='upper left', fontsize=8, ncol=1)
         axv.xaxis.grid()
-
         # -- visphi
         axp = plt.subplot(6,3,2+3*i, sharex=ax)
         if i==0:
@@ -463,20 +425,15 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                      '-k', alpha=0.22, linewidth=1, label=B)
             plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]) ))
         else:
-            plt.plot(r['wl'][w], r['VISPHI'][B][w],#- np.polyval(cc, r['wl'][w]),
+            plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
                      '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
             plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
-        if 'VISPHI_P1' in r.keys():
-            plt.plot(r['wl'][w], r['VISPHI_P1'][B][w], '-r', label='P1', alpha=0.5)
-        if 'VISPHI_P2' in r.keys():
-            plt.plot(r['wl'][w], r['VISPHI_P2'][B][w], '-b', label='P2', alpha=0.5)
-
 
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
         for k in lines.keys():
             plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
                        linestyle='dashed')
-        plt.legend(loc='upper left', fontsize=8, ncol=3)
+        plt.legend(loc='upper left', fontsize=8, ncol=1)
         axp.xaxis.grid()
     axv.set_xlabel('wavelength (um)')
     axp.set_xlabel('wavelength (um)')
@@ -516,16 +473,9 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
                      linestyle='steps')
-
-        if 'T3_P1' in r.keys():
-            plt.plot(r['wl'][w], r['T3_P1'][B][w], '-r', label='P1', alpha=0.5)
-        if 'T3_P2' in r.keys():
-            plt.plot(r['wl'][w], r['T3_P2'][B][w], '-b', label='P2', alpha=0.5)
-
-
         r['CP band'][B] = tmp[w]
         if computeDiff:
-            cc = np.polyfit(r['wl'][wc], tmp[wc], 3)
+            cc = np.polyfit(r['wl'][wc], tmp[wc],1)
             r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
 
         plt.ylim(getYlim(tmp[w]))
@@ -563,10 +513,10 @@ class guiPlot(Tkinter.Frame):
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
-            self.font = tkFont.Font(family='courier', size=11)
-        # if getpass.getuser()=='amerand':
-        #    # -- specific for Antoine Merand
-        #    self.font = tkFont.Font(family='Menlo', size=13)
+            self.font = tkFont.Font(family='Consolas', size=10)
+        if getpass.getuser()=='amerand':
+           # -- specific for Antoine Merand
+           self.font = tkFont.Font(family='monofur', size=13)
         if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
@@ -673,14 +623,12 @@ class guiPlot(Tkinter.Frame):
             c = Tkinter.Label(self.listFrame, text='no GRAV*vis*raw.fits files')
             c.pack(fill='both')
 
-        format = '%-24s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
-#                'HD151925             60.A-9256(A)     -999 MEDIUM    SPLIT A0-G1-J2-J3 1.36"  1.9ms  87%, 2.2ms  70% 2016-08-19T00:24:48 17:34'
-        legend = '      Object             Prog ID      Contain. Disp   Woll     Baseline    ASM:See T0@V   FT(T0@K)   SC       Date-Obs       LST  '
+        format = '%-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
+        legend = '    Object     Prog ID     Contain.  Disp  Wollast  Baseline   ASM:See T0@V   FT(T0@K)   SC    Date-Obs           LST '
         print ''
         print legend
         c = Tkinter.Label(self.listFrame, text='  '+legend, bg=_gray30, fg=_gray80, font=self.font)
-        c.pack()#fill='both')
-        c.config(justify='left')
+        c.pack(fill='both')
         container = None
 
         BG = [ (_myblue, _gray80),
@@ -729,10 +677,9 @@ class guiPlot(Tkinter.Frame):
                 _key = 'ESO QC ACCEPTED_RATIO_SC%s_P2'%b
                 if _key in f[0].header.keys():
                     SC.append(f[0].header[_key])
-            if 'ESO OBS BASELINE' in f[0].header.keys():
-                baseline = f[0].header['ESO OBS BASELINE']
-            else:
-                baseline = '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
+
+            baseline = '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
+
             lst = f[0].header['LST']/3600.
             lst ='%02d:%02.0f'%(int(lst), 60*(lst%1))
             text = format%(f[0].header['ESO INS SOBJ NAME']+('*' if 'calibrated' in fi else ' '),
