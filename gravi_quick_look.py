@@ -22,7 +22,10 @@ import getpass
 def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
     # check if all observations done for sma object in spectro same mode
-    if len(set([d['TARG NAME']+d['SPEC RES']+d['POLA']+d['BASELINE'] for d in data]))!=1:
+    modeObj = set(['-'.join([d['TARG NAME'],d['SPEC RES'],
+                          d['POLA'],d['BASELINE']]) for d in data])
+    if len(modeObj)!=1:
+        print modeObj
         return None
 
     for o in ['V2', 'uvV2', 'T3', 'uvT3', 'uvVISPHI']:
@@ -54,9 +57,11 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
                                 tmp[wc], 1.)
                 #print filenames[i], cc, tmp.mean()
                 if i==0:
-                    data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
+                    data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl'] -
+                                        0.5*(wlmin+wlmax)))/float(len(data))
                 else:
-                    data[0][o][k] += (tmp-np.polyval(cc, data[0]['wl']-0.5*(wlmin+wlmax)))/float(len(data))
+                    data[0][o][k] += (tmp-np.polyval(cc, data[0]['wl'] -
+                                        0.5*(wlmin+wlmax)))/float(len(data))
 
     return data[0]
 
@@ -513,10 +518,7 @@ class guiPlot(Tkinter.Frame):
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
-            self.font = tkFont.Font(family='Consolas', size=10)
-        if getpass.getuser()=='amerand':
-           # -- specific for Antoine Merand
-           self.font = tkFont.Font(family='monofur', size=13)
+            self.font = tkFont.Font(family='Menlo', size=10)
         if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
@@ -543,30 +545,28 @@ class guiPlot(Tkinter.Frame):
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        # b = Tkinter.Label(self.actFrame, text='https://github.com/amerand/GRAVIQL',
-        #                     font=self.font,justify='center', anchor='center')
-        # bo['side'] = 'left'
-        # b.pack(**bo); b.config(bg=_gray80, fg='#224488')
-
-        bo['side'] = 'right'
-        b = Tkinter.Button(self.actFrame, text='QUIT',  font=self.font,
-                           command= self.quit)
-        b.pack(**bo); b.config(bg=_crimson, fg='#000000')
-
-        b = Tkinter.Button(self.actFrame, text='Change Directory', font=self.font,
-                           command= self.changeDir)
-        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+        b = Tkinter.Label(self.actFrame, text='[https://github.com/amerand/GRAVIQL]',
+                            font=self.font,justify='center', anchor='center')
+        b.pack(**bo); b.config(bg=_gray80, fg='#224488')
 
         b = Tkinter.Button(self.actFrame, text='Reload Files', font=self.font,
                            command= self.makeFileFrame)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
+        b = Tkinter.Button(self.actFrame, text='Change Directory', font=self.font,
+                           command= self.changeDir)
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
+        b = Tkinter.Button(self.actFrame, text='QUIT',  font=self.font,
+                           command= self.quit)
+        b.pack(**bo); b.config(bg=_crimson, fg='#000000')
+
         modes = [('Full Range',  'None None'),
-                 ('High SNR',  '2.05 2.42'),
-                 ('HeI 2.058um', '2.038 2.078'),
-                 ('MgII 2.140um','2.130 2.150'),
-                 ('Brg 2.166um', '2.146 2.186'),
-                 ('NaI 2.206um', '2.198 2.218'),
+                 #('High SNR',  '2.05 2.42'),
+                 ('HeI 2.058', '2.038 2.078'),
+                 ('MgII 2.140','2.130 2.150'),
+                 ('Brg 2.166', '2.146 2.186'),
+                 ('NaI 2.206', '2.198 2.218'),
                  ('NIII 2.249',  '2.237 2.261'),
                  ('CO bands',    '2.28 None')]
 
@@ -610,6 +610,8 @@ class guiPlot(Tkinter.Frame):
                 self.listFrame.pack_forget()
 
         self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
+        self.scrollbar = Tkinter.Scrollbar(self.listFrame, orient='vertical')
+
         # -- list all files
         self.filename = None
         files = os.listdir(self.directory)
@@ -623,13 +625,20 @@ class guiPlot(Tkinter.Frame):
             c = Tkinter.Label(self.listFrame, text='no GRAV*vis*raw.fits files')
             c.pack(fill='both')
 
-        format = '%-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
-        legend = '    Object     Prog ID     Contain.  Disp  Wollast  Baseline   ASM:See T0@V   FT(T0@K)   SC    Date-Obs           LST '
-        print ''
-        print legend
-        c = Tkinter.Label(self.listFrame, text='  '+legend, bg=_gray30, fg=_gray80, font=self.font)
+        format = '%3s %-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
+        legend = '    Object       Prog ID       Contain.  Disp  Wollast  Baseline   ASM:See T0@V   FT(T0@K)   SC  Date-Obs            LST  '
+        #print ''
+        #print legend
+        c = Tkinter.Label(self.listFrame, text=legend, bg=_gray30, fg=_gray80, font=self.font)
         c.pack(fill='both')
         container = None
+
+        self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
+                                        yscrollcommand=self.scrollbar.set,
+                                        height=min(len(files), 45),
+                                        width=len(legend))
+        self.scrollbar.config(command=self.listBox.yview)
+        self.scrollbar.pack(side='right', fill='y')
 
         BG = [ (_myblue, _gray80),
                (_myorange, _gray80) ]
@@ -639,12 +648,16 @@ class guiPlot(Tkinter.Frame):
               (_gray80, _myorange) ]
         ic = -1
         container = -1
-        for fi in files:
+        self.listAllFiles = []
+
+        for _i, fi in enumerate(files):
             key = os.path.join(self.directory, fi)
-            self.checkList[key] = Tkinter.IntVar()
             f = fits.open(key)
             if f[0].header['ESO OBS PROG ID'] == 'Calibration':
                 continue
+            self.listAllFiles.append(key)
+            self.checkList[key] = Tkinter.IntVar()
+
             if not 'ESO OBS CONTAINER ID' in f[0].header.keys():
                 cont = -1
             else:
@@ -682,7 +695,8 @@ class guiPlot(Tkinter.Frame):
 
             lst = f[0].header['LST']/3600.
             lst ='%02d:%02.0f'%(int(lst), 60*(lst%1))
-            text = format%(f[0].header['ESO INS SOBJ NAME']+('*' if 'calibrated' in fi else ' '),
+            text = format%('CAL' if 'Calibrator' in f[0].header['ESO TPL NAME'] else 'SCI',
+                           f[0].header['ESO INS SOBJ NAME']+('*' if 'calibrated' in fi else ' '),
                            f[0].header['ESO OBS PROG ID'],
                            container,
                            f[0].header['ESO INS SPEC RES'],
@@ -693,33 +707,42 @@ class guiPlot(Tkinter.Frame):
                            lst)
 
             f.close()
-            c = Tkinter.Checkbutton(self.listFrame, text=text,
-                                    variable=self. checkList[key],
-                                    onvalue=1, offvalue=0, font=self.font)
-            c.pack(fill='both', side='top')
-            c.config(justify='left',
-                     foreground =FG[ic%2][0] if 'sciraw' in key else FG[ic%2][1],
-                     selectcolor=BG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
-                     fg=FG[ic%2][0] if 'sciraw' in key else FG[ic%2][1],
-                     bg=BG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
-                     activebackground=ABG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
-                     highlightbackground=ABG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
-                     borderwidth=0, padx=0, pady=0,
-                     relief='flat', offrelief='flat', overrelief='flat',
-                     highlightthickness=0,)
-            colorsT = [('46', '36'), ('43', '33')]
-            if 'sciraw' in key:
-                print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
-            else:
-                print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
+
+            self.listBox.insert('end', text)
+
+            # c = Tkinter.Checkbutton(self.listFrame, text=text, font=self.font,
+            #                         variable=self.checkList[key],
+            #                         onvalue=1, offvalue=0)
+            # c.pack(fill='both', side='top')
+            # c.config(justify='left', borderwidth=0, padx=0, pady=0, anchor='e',
+            #          foreground =FG[ic%2][0] if 'sciraw' in key else FG[ic%2][1],
+            #          selectcolor=BG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
+            #          fg=FG[ic%2][0] if 'sciraw' in key else FG[ic%2][1],
+            #          bg=BG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
+            #          activebackground=ABG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
+            #          highlightbackground=ABG[ic%2][0] if 'sciraw' in key else BG[ic%2][1],
+            #          #relief='flat', offrelief='flat', overrelief='flat',
+            #          highlightthickness=0,)
+
+            #colorsT = [('46', '36'), ('43', '33')]
+            # if 'sciraw' in key:
+            #     print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
+            # else:
+            #     print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
+        self.listBox.pack(fill='both', expand=1)
+        self.listBox.config(font=self.font)
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
         self.listFrame.pack()
         return
     def setFileList(self):
-        self.filename=[]
-        for k in self.checkList.keys():
-            if self.checkList[k].get(): self.filename.append(k)
+        self.filename = []
+        #for k in self.checkList.keys():
+        #    if self.checkList[k].get():
+        #        self.filename.append(k)
+        items = self.listBox.curselection()
+        print items
+        self.filename = [self.listAllFiles[i] for i in items]
         return
     def setPlotRange(self):
         try:
