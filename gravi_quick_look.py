@@ -9,12 +9,15 @@ if platform.uname()[1] == 'wvgoff':
     sys.path = sys.path[::-1]
 
 import numpy as np
+warnings.simplefilter('ignore', np.RankWarning)
+
 import matplotlib
 matplotlib.use('TkAgg')
 from matplotlib import pyplot as plt
 from astropy.io import fits
 import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
+import time
 
 #from PIL import ImageTk, Image
 import getpass
@@ -25,7 +28,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     modeObj = set(['-'.join([d['TARG NAME'],d['SPEC RES'],
                           d['POLA'],d['BASELINE']]) for d in data])
     if len(modeObj)!=1:
-        print modeObj
+        #print modeObj
         return None
 
     for o in ['V2', 'uvV2', 'T3', 'uvT3', 'uvVISPHI']:
@@ -69,7 +72,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     f = fits.open(filename)
     res = {}
     insnames = []
-
+    
+    print filename
     if 'SC' in insname:
         res['DIAM'] = f[0].header['ESO INS SOBJ DIAMETER']
     else:
@@ -81,6 +85,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     res['PROG ID'] = f[0].header['ESO OBS PROG ID']
     res['SPEC RES'] = f[0].header['ESO INS SPEC RES']
     res['POLA'] = f[0].header['ESO INS POLA MODE']
+    res['DIT'] = f[0].header['ESO DET2 SEQ1 DIT']
     res['BASELINE']= '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
     if insname=='auto':
         if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
@@ -506,7 +511,8 @@ _myLightorange = '#FFBB44'
 class guiPlot(Tkinter.Frame):
     def __init__(self,root, directory=None):
         self.root = root
-        if directory is None:
+        if directory is None or not os.path.exists(directory):
+            self.directory = None
             self.changeDir()
         else:
             self.directory = directory
@@ -525,6 +531,7 @@ class guiPlot(Tkinter.Frame):
 
         self.makeMainFrame()
         # -- done --
+
     def quit(self):
         self.root.destroy()
         quit()
@@ -534,7 +541,7 @@ class guiPlot(Tkinter.Frame):
         self.waveFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.actFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.listFrame = None
-        self.root.title('GRAVIQL '+self.directory)
+        self.root.title('GRAVIQL '+os.path.abspath(self.directory))
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
         b = Tkinter.Button(self.actFrame, text='Show CP, dPhi, V2', font=self.font,
@@ -582,6 +589,7 @@ class guiPlot(Tkinter.Frame):
                                 indicatoron=0)
             b.pack(**bo)
             b.config(selectcolor=_myorange, fg=_gray80, bg=_gray30)
+
         bo = {'fill':'both', 'side':'right', 'padx':0, 'pady':1}
         b = Tkinter.Label(self.waveFrame, text='um',
                           bg=_gray30, fg=_gray80, font=self.font)
@@ -590,9 +598,14 @@ class guiPlot(Tkinter.Frame):
         b = Tkinter.Entry(self.waveFrame, textvariable=self.wlrange,
                           width=12, font=self.font)
         b.pack(**bo)
-        b.config(bg=_gray30, fg=_gray80)
+
+        b = Tkinter.Label(self.waveFrame, text='WL range',
+                          bg=_gray30, fg=_gray80, font=self.font)
+        b.pack(**bo)
+        
         self.makeFileFrame()
         return
+
     def changeDir(self):
         self.root.update()
         self.directory = tkFileDialog.askdirectory(initialdir=self.directory)
@@ -616,29 +629,52 @@ class guiPlot(Tkinter.Frame):
         self.filename = None
         files = os.listdir(self.directory)
 
-        files = filter(lambda x: (x.endswith('raw.fits') or x.endswith('calibrated.fits'))
-                                  and x.startswith('GRAV') and '_vis' in x, files)
-        files.sort()
+        mjdobs, tplid = [], []
+        print time.asctime()+' Filtering FITS files...'
+        files = filter(lambda x: x.endswith('.fits') , files)
+        N = 80
+        for i, f in enumerate(files):
+            n = int(i*N/float(len(files))+1)
+            print '|'+'='*n+' '*(N-n-1)+'|'
+            h = fits.open(os.path.join(self.directory, f))
+            if 'MJD-OBS' in h[0].header:
+                mjdobs.append(h[0].header['MJD-OBS'])
+            else:
+                mjdobs.append(0)
+            if 'ESO TPL ID' in h[0].header and 'ESO PRO CATG' in h[0].header:
+                tplid.append('/'.join([h[0].header['ESO TPL ID'],
+                                       h[0].header['ESO PRO CATG']]))
+                                       
+            else:
+                tplid.append('')
+            h.close() 
+            print '\033[F',
+        mjdobs = np.array(mjdobs)
+        w = np.where(['GRAVITY' in i and 
+                      '_obs_' in i and 
+                      not '_SKY' in i and 
+                      'VIS_' in i and '_RAW' in i for i in tplid])
+        files = list(np.array(files)[w][np.argsort(mjdobs[w])])
         self.checkList = {}
 
-        if len(files)==0:
-            c = Tkinter.Label(self.listFrame, text='no GRAV*vis*raw.fits files')
-            c.pack(fill='both')
-
-        format = '%3s %-12s %-13s %7d %6s %8s %11s %4.2f" %4.1fms %3.0f%%,%4.1fms %3.0f%% %19s %5s'
-        legend = '    Object       Prog ID       Contain.  Disp  Wollast  Baseline   ASM:See T0@V   FT(T0@K)   SC  Date-Obs            LST  '
+        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%2.0fms) %3.0f%% %16s %5s'
+        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC   Date-Obs          LST  '
         #print ''
         #print legend
         c = Tkinter.Label(self.listFrame, text=legend, bg=_gray30, fg=_gray80, font=self.font)
         c.pack(fill='both')
         container = None
 
-        self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
-                                        yscrollcommand=self.scrollbar.set,
-                                        height=min(len(files), 45),
-                                        width=len(legend))
-        self.scrollbar.config(command=self.listBox.yview)
-        self.scrollbar.pack(side='right', fill='y')
+        if len(files)==0:
+            c = Tkinter.Label(self.listFrame, text='--- no relevant files to display ---')
+            c.pack(fill='both')
+        else:
+            self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
+                                           yscrollcommand=self.scrollbar.set,
+                                           height=min(len(files), 45),
+                                           width=len(legend))
+            self.scrollbar.config(command=self.listBox.yview)
+            self.scrollbar.pack(side='right', fill='y')
 
         BG = [ (_myblue, _gray80),
                (_myorange, _gray80) ]
@@ -649,12 +685,13 @@ class guiPlot(Tkinter.Frame):
         ic = -1
         container = -1
         self.listAllFiles = []
-
+        print '\033[F',
+        print time.asctime()+' Loading relevant files...'
         for _i, fi in enumerate(files):
+            n = int(_i*N/float(len(files))+1)
+            print '|'+'='*n+' '*(N-n-1)+'|'
             key = os.path.join(self.directory, fi)
             f = fits.open(key)
-            if f[0].header['ESO OBS PROG ID'] == 'Calibration':
-                continue
             self.listAllFiles.append(key)
             self.checkList[key] = Tkinter.IntVar()
 
@@ -690,20 +727,24 @@ class guiPlot(Tkinter.Frame):
                 _key = 'ESO QC ACCEPTED_RATIO_SC%s_P2'%b
                 if _key in f[0].header.keys():
                     SC.append(f[0].header[_key])
-
+            dit = f[0].header['ESO DET2 SEQ1 DIT']
             baseline = '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
 
             lst = f[0].header['LST']/3600.
             lst ='%02d:%02.0f'%(int(lst), 60*(lst%1))
+            dit = f[0].header['ESO DET2 SEQ1 DIT']
+            dit = '%2.0f'%dit if dit>1 else ('%2.1f'%dit)[1:]
+            tau0 = '%2.0f'%tau0 if tau0>1 else ('%2.1f'%tau0)[1:]
+            seeing = '%3.1f'%seeing if seeing>1 else ('%4.2f'%seeing)[1:]
             text = format%('CAL' if 'Calibrator' in f[0].header['ESO TPL NAME'] else 'SCI',
-                           f[0].header['ESO INS SOBJ NAME']+('*' if 'calibrated' in fi else ' '),
+                           f[0].header['ESO INS SOBJ NAME'][:12]+('*' if 'calibrated' in fi else ' '),
                            f[0].header['ESO OBS PROG ID'],
                            container,
-                           f[0].header['ESO INS SPEC RES'],
-                           f[0].header['ESO INS POLA MODE'],
-                           baseline, seeing, tau0,
-                           np.median(FT), np.median(T0), np.median(SC),
-                           f[0].header['DATE-OBS'],
+                           f[0].header['ESO INS SPEC RES'][:2],
+                           f[0].header['ESO INS POLA MODE'][:3], 
+                           dit, baseline, seeing, tau0,
+                           np.median(FT), max(-1, np.median(T0)), np.median(SC),
+                           f[0].header['DATE-OBS'][:-3],
                            lst)
 
             f.close()
@@ -729,8 +770,13 @@ class guiPlot(Tkinter.Frame):
             #     print '\033[%sm'%colorsT[ic%2][0]+text+'\033[0m'
             # else:
             #     print '\033[%sm'%colorsT[ic%2][1]+text+'\033[0m'
-        self.listBox.pack(fill='both', expand=1)
-        self.listBox.config(font=self.font)
+            print '\033[F',
+        print '\033[F',
+        print ''
+        print ''
+        if len(files)>0:
+            self.listBox.pack(fill='both', expand=1)
+            self.listBox.config(font=self.font, highlightbackground=FG[0][0])
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
         self.listFrame.pack()
@@ -741,7 +787,7 @@ class guiPlot(Tkinter.Frame):
         #    if self.checkList[k].get():
         #        self.filename.append(k)
         items = self.listBox.curselection()
-        print items
+        
         self.filename = [self.listAllFiles[i] for i in items]
         return
     def setPlotRange(self):
