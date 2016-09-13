@@ -73,7 +73,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     res = {}
     insnames = []
     
-    print filename
+    #print filename
     if 'SC' in insname:
         res['DIAM'] = f[0].header['ESO INS SOBJ DIAMETER']
     else:
@@ -508,6 +508,7 @@ _myblue = '#224488'
 _myorange = '#886622'
 _myLightblue = '#44BBFF'
 _myLightorange = '#FFBB44'
+
 class guiPlot(Tkinter.Frame):
     def __init__(self,root, directory=None):
         self.root = root
@@ -621,22 +622,27 @@ class guiPlot(Tkinter.Frame):
                 widget.destroy()
                 self.listFrame.destroy()
                 self.listFrame.pack_forget()
-
-        self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
-        self.scrollbar = Tkinter.Scrollbar(self.listFrame, orient='vertical')
-
+            # -- temporary message:
+            #c = Tkinter.Label(self.listwaveFrame, text='Reloading ...')
+            #c.pack(fill='both')
+            #self.actFrame.pack(anchor='nw', fill='x')
+            #self.waveFrame.pack(anchor='nw', fill='x')
+            
         # -- list all files
         self.filename = None
         files = os.listdir(self.directory)
 
         mjdobs, tplid = [], []
-        print time.asctime()+' Filtering FITS files...'
+        print time.asctime()+' Filtering %d FITS files ...'%len(files)
         files = filter(lambda x: x.endswith('.fits') , files)
         N = 80
         for i, f in enumerate(files):
             n = int(i*N/float(len(files))+1)
             print '|'+'='*n+' '*(N-n-1)+'|'
-            h = fits.open(os.path.join(self.directory, f))
+            try:
+                h = fits.open(os.path.join(self.directory, f))
+            except:
+                continue
             if 'MJD-OBS' in h[0].header:
                 mjdobs.append(h[0].header['MJD-OBS'])
             else:
@@ -653,22 +659,31 @@ class guiPlot(Tkinter.Frame):
         w = np.where(['GRAVITY' in i and 
                       '_obs_' in i and 
                       not '_SKY' in i and 
-                      'VIS_' in i and '_RAW' in i for i in tplid])
+                      'VIS_' in i and 
+                      (i.endswith('_RAW') or i.endswith('_CALIBRATED')) for i in tplid])
         files = list(np.array(files)[w][np.argsort(mjdobs[w])])
         self.checkList = {}
 
-        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%2.0fms) %3.0f%% %16s %5s'
-        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC   Date-Obs          LST  '
+        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%2.0fms) %3.0f%%(%1.0f) %16s %5s'
+        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB)  Date-Obs          LST  '
         #print ''
         #print legend
-        c = Tkinter.Label(self.listFrame, text=legend, bg=_gray30, fg=_gray80, font=self.font)
-        c.pack(fill='both')
+
         container = None
 
         if len(files)==0:
+            self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
             c = Tkinter.Label(self.listFrame, text='--- no relevant files to display ---')
             c.pack(fill='both')
+            self.actFrame.pack(anchor='nw', fill='x')
+            self.waveFrame.pack(anchor='nw', fill='x')
+            self.listFrame.pack()
+            return
         else:
+            self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
+            self.scrollbar = Tkinter.Scrollbar(self.listFrame, orient='vertical')
+            c = Tkinter.Label(self.listFrame, text=legend, bg=_gray30, fg=_gray80, font=self.font)
+            c.pack(fill='both')
             self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
                                            yscrollcommand=self.scrollbar.set,
                                            height=min(len(files), 45),
@@ -686,7 +701,7 @@ class guiPlot(Tkinter.Frame):
         container = -1
         self.listAllFiles = []
         print '\033[F',
-        print time.asctime()+' Loading relevant files...'
+        print time.asctime()+' Loading %d relevant files...'%len(files)
         for _i, fi in enumerate(files):
             n = int(_i*N/float(len(files))+1)
             print '|'+'='*n+' '*(N-n-1)+'|'
@@ -743,7 +758,8 @@ class guiPlot(Tkinter.Frame):
                            f[0].header['ESO INS SPEC RES'][:2],
                            f[0].header['ESO INS POLA MODE'][:3], 
                            dit, baseline, seeing, tau0,
-                           np.median(FT), max(-1, np.median(T0)), np.median(SC),
+                           np.median(FT), max(-1, np.median(T0)),
+                           np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6., 
                            f[0].header['DATE-OBS'][:-3],
                            lst)
 
