@@ -213,15 +213,16 @@ def slidingOp(x,y,dx):
     returns 25%, median, 75%
     """
     res = {}
-    for k in ['25%', '75%', 'median', '1sigma', 'mean']:
+    for k in ['25%', '75%', 'median', '1sigma', 'mean', '90%']:
         res[k] = np.zeros(len(x))
 
     for i in range(len(x)):
         yp = y[np.abs(x-x[i])<=dx/2]
-        res['25%'][i]    = np.percentile(yp, 25)
+        #res['25%'][i]    = np.percentile(yp, 25)
         res['median'][i] = np.percentile(yp, 50)
-        res['mean'][i]   = np.mean(yp)
+        #res['mean'][i]   = np.mean(yp)
         res['75%'][i]    = np.percentile(yp, 75)
+        res['90%'][i]    = np.percentile(yp, 90)
         res['1sigma'][i] = (np.percentile(yp, 84)-np.percentile(yp, 16))/2
     return res
 
@@ -278,10 +279,12 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         r = loadGravi(filename, insname)
     if r is None:
         return False
-    plt.close(0)
+
     if onlySpectrum:
-        plt.figure(0, figsize=(15,5))
+        plt.close(1)
+        plt.figure(1, figsize=(15,5))
     else:
+        plt.close(0)        
         plt.figure(0, figsize=(15,9))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
@@ -312,26 +315,32 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
     tmp = 0
     for T in r['FLUX'].keys():
         tmp += r['FLUX'][T]/r['FLUX'][T].mean()/4.
-    # -- telluric
+
+    # -- telluric spectrum
     try:
         tell = tellTrans(r['wl'][w]/1.00025, width=2.2 if r['SPEC RES']=='HIGH' else 1.2)
     except:
         print 'Warning, could not load telluric spectrum'
         tell = np.ones(len(r['wl'][w]))
-
-    sli = slidingOp(r['wl'][w], tmp[w]-1, 0.05)
-    c = np.polyfit(r['wl'][w], sli['75%'], 3, w=1/sli['1sigma'])
-
-    tell *= 1+np.polyval(c, r['wl'][w])
-
+    
+    # -- fit continnum:
+    R = (4000. if r['SPEC RES']=='HIGH' else 500.)
+    cont1 = slidingOp(r['wl'][w], tmp[w]/tell, 0.05)['median']
+    cont2 = slidingOp(r['wl'][w], tmp[w]/tell/cont1, 0.02)['75%']
+    
+    cont = cont1*cont2
     if onlySpectrum:
-        plt.plot(r['wl'][w], tell, '-b', alpha=0.35,
-                 label='tell.+cont')#, linestyle='steps')
-        plt.plot(r['wl'][w], tmp[w], '-k', label='raw',
-                 alpha=0.2)#, linestyle='steps')
-    tmp[w]/=tell
+        #plt.plot(r['wl'][w], tren, '-r', alpha=0.35,
+        #         label='trend')
+        plt.plot(r['wl'][w], cont, '-g', alpha=0.35,
+                 label='continuum')
+        plt.plot(r['wl'][w], tell*cont, '-b', alpha=0.35,
+                 label='telluric * continuum')
+        plt.plot(r['wl'][w], tmp[w], '-k', label='raw spectrum',
+                 alpha=0.2)
+    tmp[w] /= tell*cont
 
-    plt.plot(r['wl'][w], tmp[w], '-k', label='spectr',
+    plt.plot(r['wl'][w], tmp[w], '-k', label='normalized spectrum',
              alpha=0.7, linewidth=1, linestyle='steps')
     # -- remove continuum
     wc =  np.where((r['wl']<=wlmax)*(r['wl']>=wlmin)*
@@ -573,7 +582,7 @@ class guiPlot(Tkinter.Frame):
                  #('High SNR',  '2.05 2.42'),
                  ('HeI 2.058', '2.038 2.078'),
                  ('MgII 2.140','2.130 2.150'),
-                 ('Brg 2.166', '2.146 2.186'),
+                 ('Brg 2.166', '2.136 2.196'),
                  ('NaI 2.206', '2.198 2.218'),
                  ('NIII 2.249',  '2.237 2.261'),
                  ('CO bands',    '2.28 None')]
@@ -642,6 +651,10 @@ class guiPlot(Tkinter.Frame):
             try:
                 h = fits.open(os.path.join(self.directory, f))
             except:
+                continue
+            if 'INSTRUME' in h[0].header and \
+                    h[0].header['INSTRUME']!='GRAVITY':
+                h.close()
                 continue
             if 'MJD-OBS' in h[0].header:
                 mjdobs.append(h[0].header['MJD-OBS'])
