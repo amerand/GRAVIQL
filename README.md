@@ -10,12 +10,9 @@ Run [gravi_quick_look.py](gravi_quick_look.py) as a script and select a director
 * The top rows allow to start show the data plots (in matplotlib). Note the spectra are roughly corrected for telluric features using a synthetic atmospheric model for 2.0mm of water vapor. Spectral ranges can be selected using buttons or by manually entering the range as the boundaries (in um) separated by a space.
 
 ## Limitations
-* Assumes the following naming conventions for the files:
-  * **GRAV\*\_vis\*raw.fits** for raw files.
-  * **GRAV\*\_vis\*calibrated.fits** for reduced files.
 * Tested on MEDIUM and HIGH dispersion modes only.
 * Telluric correction is very approximative and only indicative.
-* Tested on Anaconda/MacOS and Anaconda/Linux. Running on the MacOS native python gives rise to issues with the directory selector.
+* Tested on Anaconda/MacOS (does not work) and Anaconda/Linux (works). Running on the MacOS native python is a possibility, but astropy would have to be manually installed. 
 
 ## Dependencies
 
