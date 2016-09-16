@@ -31,13 +31,16 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
         #print modeObj
         return None
 
-    for o in ['V2', 'uvV2', 'T3', 'uvT3', 'uvVISPHI']:
+    for o in ['V2', 'uV2', 'vV2', 
+              'T3', 'u1T3', 'v1T3', 'u2T3', 'v2T3', 
+              'VISPHI', 'uVISPHI', 'vVISPHI']:
         for k in data[0][o].keys():
             for i in range(len(data)):
                 if i==0:
                     data[i][o][k] = np.array(data[i][o][k])/float(len(data))
                 else:
                     data[0][o][k] += np.array(data[i][o][k])/float(len(data))
+
 
     # -- averaging differential phase, not phase
     if wlmin is None or wlmin<data[0]['wl'].min():
@@ -51,19 +54,17 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
                     (np.abs(data[0]['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin)))
     else:
         wc = np.where(data[0]['wl'])
-    for o in ['VISPHI']:
-        for k in data[0][o].keys():
+    for o in ['VISPHI']: # for each baseline
+        for k in data[0][o].keys(): # for each baseline
             for i in range(len(data)):
-                tmp = data[i][o][k].copy()
-                tmp = (tmp+90)%180-90
-                cc = np.polyfit(data[0]['wl'][wc]-0.5*(wlmin+wlmax),
-                                tmp[wc], 1.)
+                #print '->', data[0]['wl'].shape, tmp.shape
+                cc = nanpolyfit(data[0]['wl'][wc]-0.5*(wlmin+wlmax), data[i][o][k][wc], 1)
                 #print filenames[i], cc, tmp.mean()
                 if i==0:
-                    data[i][o][k] = (tmp-np.polyval(cc, data[0]['wl'] -
+                    data[i][o][k] = (data[i][o][k] - np.polyval(cc, data[0]['wl'] -
                                         0.5*(wlmin+wlmax)))/float(len(data))
                 else:
-                    data[0][o][k] += (tmp-np.polyval(cc, data[0]['wl'] -
+                    data[0][o][k] += (data[i][o][k] - np.polyval(cc, data[0]['wl'] -
                                         0.5*(wlmin+wlmax)))/float(len(data))
 
     return data[0]
@@ -110,89 +111,120 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                        f['OI_ARRAY'].data['STA_NAME']))
     # -- V2: ----
     res['V2'] = None
+    n = 0.0
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_VIS2':
             if insname in h.header['INSNAME']:
                 if res['V2'] is None:
                     res['V2'] = {}
+                    res['uV2'] = {}
+                    res['vV2'] = {}
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-
                         res['V2'][k] = h.data['VIS2DATA'][i].copy()
-                        #res['V2'][k][1-h.data['FLAG'][i]] = np.nan
-
+                        res['V2'][k][h.data['FLAG'][i]] = np.nan
+                        res['uV2'][k] = h.data['UCOORD'][i].copy()
+                        res['vV2'][k] = h.data['VCOORD'][i].copy()
+                    n += 1
                 else:
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        res['V2'][k] = res['V2'][k]/2. + h.data['VIS2DATA'][i]/2
-                        #res['V2'][k][1-h.data['FLAG'][i]] = np.nan
+                        res['V2'][k] += h.data['VIS2DATA'][i]
+                        res['V2'][k][h.data['FLAG'][i]] = np.nan
+                        res['uV2'][k] += h.data['UCOORD'][i].copy()
+                        res['vV2'][k] += h.data['VCOORD'][i].copy()
+                    n += 1
 
-                res['uvV2'] = {oiarray[h.data['STA_INDEX'][i][0]]+
-                                   oiarray[h.data['STA_INDEX'][i][1]]:
-                                       (h.data['UCOORD'][i].copy(),
-                                        h.data['VCOORD'][i].copy())
-                                   for i in range(6)}
+    for k in res['V2'].keys():
+        res['V2'][k]  /= float(n)
+        res['uV2'][k] /= float(n)
+        res['vV2'][k] /= float(n)
+                
     # -- T3: ----
     res['T3'] = None
+    n = 0.0
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_T3':
             if insname in h.header['INSNAME']:
                 if res['T3']==None:
                     res['T3'] = {}
+                    res['u1T3'],res['v1T3'], res['u2T3'],res['v2T3']  = {}, {}, {}, {}
+                    
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
                         res['T3'][k] = h.data['T3PHI'][i].copy()
-                        #res['T3'][k][1-h.data['FLAG'][i]] = np.nan
+                        res['T3'][k][h.data['FLAG'][i]] = np.nan
+                        res['u1T3'][k] = h.data['U1COORD'][i].copy()
+                        res['v1T3'][k] = h.data['V1COORD'][i].copy()
+                        res['u2T3'][k] = h.data['U2COORD'][i].copy()
+                        res['v2T3'][k] = h.data['V2COORD'][i].copy()
+                    n += 1.0
                 else:
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
-                        res['T3'][k] = (res['T3'][k]/2. + h.data['T3PHI'][i]/2+180)%360-180
-                        #res['T3'][k][1-h.data['FLAG'][i]] = np.nan
+                        res['T3'][k] +=  h.data['T3PHI'][i]
+                        res['T3'][k][h.data['FLAG'][i]] = np.nan
+                        res['u1T3'][k] += h.data['U1COORD'][i].copy()
+                        res['v1T3'][k] += h.data['V1COORD'][i].copy()
+                        res['u2T3'][k] += h.data['U2COORD'][i].copy()
+                        res['v2T3'][k] += h.data['V2COORD'][i].copy()
+                    n += 1.0
 
-                res['uvT3'] = {oiarray[h.data['STA_INDEX'][i][0]]+
-                              oiarray[h.data['STA_INDEX'][i][1]]+
-                              oiarray[h.data['STA_INDEX'][i][2]]:
-                              (h.data['U1COORD'][i].copy(),
-                               h.data['V1COORD'][i].copy(),
-                               h.data['U2COORD'][i].copy(),
-                               h.data['V2COORD'][i].copy(),)
-                               for i in range(4)}
+    for k in res['T3'].keys():
+        res['T3'][k]  /= float(n)
+        res['T3'][k] = (res['T3'][k]+180)%360 - 180
+        # TODO: unwrap
+        res['u1T3'][k] /= n
+        res['v1T3'][k] /= n
+        res['u2T3'][k] /= n
+        res['v2T3'][k] /= n
+
     # -- diff Phase ---
     res['VISPHI'] = None
+    n = 0.0
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_VIS':
             if insname in h.header['INSNAME']:
                 if res['VISPHI'] is None:
                     res['VISPHI'] = {}
+                    res['uVISPHI'] = {}
+                    res['vVISPHI'] = {}
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['VISPHI'][k] = h.data['VISPHI'][i].copy()
-                        #res['VISPHI'][k][1-h.data['FLAG'][i]] = np.nan
+                        res['VISPHI'][k][h.data['FLAG'][i]] = np.nan
+                        res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
+                        res['vVISPHI'][k] = h.data['VCOORD'][i].copy()
+                    n += 1
                 else:
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        res['VISPHI'][k] = res['VISPHI'][k]/2. + h.data['VISPHI'][i]/2
-                        #res['VISPHI'][k][1-h.data['FLAG'][i]] = np.nan
-
-                res['uvVISPHI'] = {oiarray[h.data['STA_INDEX'][i][0]]+
-                                   oiarray[h.data['STA_INDEX'][i][1]]:
-                                       (h.data['UCOORD'][i].copy(),
-                                        h.data['VCOORD'][i].copy())
-                                   for i in range(6)}
-
+                        res['VISPHI'][k] += h.data['VISPHI'][i]
+                        res['VISPHI'][k][h.data['FLAG'][i]] = np.nan
+                        res['uVISPHI'][k] += h.data['UCOORD'][i]
+                        res['vVISPHI'][k] += h.data['VCOORD'][i]
+                    n += 1 
+    for k in res['VISPHI'].keys():
+        res['VISPHI'][k] /= float(n)
+        res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
+        # TODO: unwrap
+        res['uVISPHI'][k] /= float(n)
+        res['vVISPHI'][k] /= float(n)
+                
     # -- Spctr: ----
     res['FLUX'] = None
+    n = 0.0
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_FLUX':
@@ -200,10 +232,14 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                 if res['FLUX'] is None:
                     res['FLUX'] = {oiarray[h.data['STA_INDEX'][i]]:
                                        h.data['FLUX'][i].copy() for i in range(4)}
+                    n += 1
                 else:
                     for i in range(4):
                          k = oiarray[h.data['STA_INDEX'][i]]
-                         res['FLUX'][k] = res['FLUX'][k]/2. + h.data['FLUX'][i]/2
+                         res['FLUX'][k] += h.data['FLUX'][i]
+                         n += 1
+    for k in res['FLUX'].keys():
+        res['FLUX'][k] /= n
 
     f.close()
     return res
@@ -262,12 +298,11 @@ def tellTrans(wl, width=2.3):
     return np.array(res)
 
 def getYlim(y):
-    return np.median(y) - 1.5*(np.percentile(y,98)-np.percentile(y,2)),\
-           np.median(y) + 1.5*(np.percentile(y,98)-np.percentile(y,2))
-
+    return np.nanmedian(y) - 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2)),\
+           np.nanmedian(y) + 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2))
 
 def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
-              onlySpectrum=False, export=None):
+              onlySpectrum=False, export=None, v2b=False):
     top = 0
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
@@ -281,11 +316,14 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         return False
 
     if onlySpectrum:
-        plt.close(1)
-        plt.figure(1, figsize=(15,5))
-    else:
+        plt.close(2)
+        plt.figure(2, figsize=(15,5))
+    elif v2b:
         plt.close(0)        
-        plt.figure(0, figsize=(15,9))
+        plt.figure(0, figsize=(9,9))
+    else:
+        plt.close(1)        
+        plt.figure(1, figsize=(15,9))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
                                            r['OB NAME'], r['INSNAME']]))
@@ -297,7 +335,18 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
 
     w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
     r['wl band'] = r['wl'][w]
-    if len(w[0])<len(r['wl'])/3:
+
+    if v2b:
+        for i,k in enumerate(r['V2'].keys()):
+            B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
+            plt.plot(B/r['wl'][w], r['V2'][k][w], 
+                     label=k+' (%5.1fm)'%B,
+                     marker='.', linestyle='-')
+        plt.legend(loc='upper right')
+        plt.show()
+        return True
+
+    if len(w[0])<len(r['wl'])/3 and not v2b:
         computeDiff = True
     else:
         computeDiff = False
@@ -335,7 +384,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         plt.plot(r['wl'][w], cont, '-g', alpha=0.35,
                  label='continuum')
         plt.plot(r['wl'][w], tell*cont, '-b', alpha=0.35,
-                 label='telluric * continuum')
+                 label='synthetic telluric')
         plt.plot(r['wl'][w], tmp[w], '-k', label='raw spectrum',
                  alpha=0.2)
     tmp[w] /= tell*cont
@@ -347,7 +396,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                    (np.abs(r['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin))  )
 
     if computeDiff:
-        cc = np.polyfit(r['wl'][wc],tmp[wc],1)
+        cc = nanpolyfit(r['wl'][wc],tmp[wc],1)
         r['spectrum band'] = tmp[w] - np.polyval(cc,r['wl'][w]) + 1
     plt.ylim(getYlim(tmp[w]))
 
@@ -413,7 +462,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                      linestyle='steps')
             r['V2 band'][B] = r['V2'][B][w]
             if computeDiff:
-                cc = np.polyfit(r['wl'][wc],r['V2'][B][wc],1)
+                cc = nanpolyfit(r['wl'][wc],r['V2'][B][wc],1)
                 r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
 
         for k in lines.keys():
@@ -428,9 +477,9 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         if i==0:
             plt.title('Diff Phase (deg)')
         if computeDiff:
-            cc = np.polyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
+            cc = nanpolyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
         else:
-            cc = np.polyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
+            cc = nanpolyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
         r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
         if r['SPEC RES']=='HIGH' and filt:
             spr = r['VISPHI'][B][w]
@@ -494,7 +543,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                      linestyle='steps')
         r['CP band'][B] = tmp[w]
         if computeDiff:
-            cc = np.polyfit(r['wl'][wc], tmp[wc],1)
+            cc = nanpolyfit(r['wl'][wc], tmp[wc],1)
             r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
 
         plt.ylim(getYlim(tmp[w]))
@@ -508,7 +557,12 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
     plt.xlabel('wavelength (um)')
     plt.xlim(wlmin, wlmax)
     plt.show()
-    return r
+    return 
+
+def nanpolyfit(x,y,o):
+    x, y = np.array(x), np.array(y)
+    w = np.isfinite(x*y)
+    return np.polyfit(x[w], y[w], o)
 
 _gray80 = '#BBBBBB'
 _gray30 = '#444444'
@@ -521,14 +575,13 @@ _myLightorange = '#FFBB44'
 class guiPlot(Tkinter.Frame):
     def __init__(self,root, directory=None):
         self.root = root
+        self.widthProgressBar = 80
+        self.n = 0
         if directory is None or not os.path.exists(directory):
             self.directory = None
             self.changeDir()
         else:
             self.directory = directory
-        self.root = root
-        #self.colors = ('Dark slate blue', 'Dark goldenrod')
-        #self.colors = ('Dark cyan', 'Dark orange')
 
         self.mainFrame = None
         self.font = tkFont.Font(family='courier', size=12)
@@ -540,11 +593,52 @@ class guiPlot(Tkinter.Frame):
             self.font = None
 
         self.makeMainFrame()
-        # -- done --
+        
 
     def quit(self):
         self.root.destroy()
         quit()
+
+    def get_listFiles(self, quiet=False):
+        files = os.listdir(self.directory)
+        mjdobs, tplid = [], []
+        if not quiet:
+            print time.asctime()+' Filtering %d FITS files ...'%len(files)
+        files = filter(lambda x: x.endswith('.fits') , files)
+        self.checkDir = len(files)
+        N = self.widthProgressBar
+        for i, f in enumerate(files):
+            n = int(i*N/float(len(files))+1)
+            if not quiet:
+                print '|'+'='*n+' '*(N-n-1)+'|'
+            try:
+                h = fits.open(os.path.join(self.directory, f))
+            except:
+                continue
+            if 'INSTRUME' in h[0].header and \
+                    h[0].header['INSTRUME']!='GRAVITY':
+                h.close()
+                continue
+            if 'MJD-OBS' in h[0].header:
+                mjdobs.append(h[0].header['MJD-OBS'])
+            else:
+                mjdobs.append(0)
+            if 'ESO TPL ID' in h[0].header and 'ESO PRO CATG' in h[0].header:
+                tplid.append('/'.join([h[0].header['ESO TPL ID'],
+                                       h[0].header['ESO PRO CATG']]))
+            else:
+                tplid.append('')
+            h.close() 
+            if not quiet:
+                print '\033[F',
+        mjdobs = np.array(mjdobs)
+        w = np.where(['GRAVITY' in i and 
+                      '_obs_' in i and 
+                      not '_SKY' in i and 
+                      'VIS_' in i and 
+                      (i.endswith('_RAW') or i.endswith('_CALIBRATED')) for i in tplid])
+        files = list(np.array(files)[w][np.argsort(mjdobs[w])])
+        return files
 
     def makeMainFrame(self):
         self.mainFrame = Tkinter.Frame.__init__(self, self.root, bg=_gray30)
@@ -554,11 +648,16 @@ class guiPlot(Tkinter.Frame):
         self.root.title('GRAVIQL '+os.path.abspath(self.directory))
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
-        b = Tkinter.Button(self.actFrame, text='Show CP, dPhi, V2', font=self.font,
+        
+        b = Tkinter.Button(self.actFrame, text='CP, dPhi, V2', font=self.font,
                            command = self.quickViewAll)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        b = Tkinter.Button(self.actFrame, text='Show Spectrum',  font=self.font,
+        b = Tkinter.Button(self.actFrame, text='V2(B)', font=self.font,
+                           command = self.quickViewV2)
+        b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
+        
+        b = Tkinter.Button(self.actFrame, text='Spectrum',  font=self.font,
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
@@ -615,6 +714,15 @@ class guiPlot(Tkinter.Frame):
         
         self.makeFileFrame()
         return
+    def tick(self):
+        #print ['tic', 'tac'][self.n%2], time.asctime()
+        self.n += 1
+        tmp = len(filter(lambda f: f.endswith('fits'), os.listdir(self.directory)))
+        if tmp!=self.checkDir:
+            if tkMessageBox.askyesno('GRAVIQL', 'the directory has changed, do you want to update the file list?'):
+                self.makeFileFrame()
+        self.listFrame.after(60000, self.tick)
+        return
 
     def changeDir(self):
         self.root.update()
@@ -639,43 +747,8 @@ class guiPlot(Tkinter.Frame):
             
         # -- list all files
         self.filename = None
-        files = os.listdir(self.directory)
-
-        mjdobs, tplid = [], []
-        print time.asctime()+' Filtering %d FITS files ...'%len(files)
-        files = filter(lambda x: x.endswith('.fits') , files)
-        N = 80
-        for i, f in enumerate(files):
-            n = int(i*N/float(len(files))+1)
-            print '|'+'='*n+' '*(N-n-1)+'|'
-            try:
-                h = fits.open(os.path.join(self.directory, f))
-            except:
-                continue
-            if 'INSTRUME' in h[0].header and \
-                    h[0].header['INSTRUME']!='GRAVITY':
-                h.close()
-                continue
-            if 'MJD-OBS' in h[0].header:
-                mjdobs.append(h[0].header['MJD-OBS'])
-            else:
-                mjdobs.append(0)
-            if 'ESO TPL ID' in h[0].header and 'ESO PRO CATG' in h[0].header:
-                tplid.append('/'.join([h[0].header['ESO TPL ID'],
-                                       h[0].header['ESO PRO CATG']]))
-                                       
-            else:
-                tplid.append('')
-            h.close() 
-            print '\033[F',
-        mjdobs = np.array(mjdobs)
-        w = np.where(['GRAVITY' in i and 
-                      '_obs_' in i and 
-                      not '_SKY' in i and 
-                      'VIS_' in i and 
-                      (i.endswith('_RAW') or i.endswith('_CALIBRATED')) for i in tplid])
-        files = list(np.array(files)[w][np.argsort(mjdobs[w])])
         self.checkList = {}
+        self.listFiles = self.get_listFiles()
 
         format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%2.0fms) %3.0f%%(%1.0f) %16s %5s'
         legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB)  Date-Obs          LST  '
@@ -684,7 +757,7 @@ class guiPlot(Tkinter.Frame):
 
         container = None
 
-        if len(files)==0:
+        if len(self.listFiles)==0:
             self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
             c = Tkinter.Label(self.listFrame, text='--- no relevant files to display ---')
             c.pack(fill='both')
@@ -699,7 +772,7 @@ class guiPlot(Tkinter.Frame):
             c.pack(fill='both')
             self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
                                            yscrollcommand=self.scrollbar.set,
-                                           height=min(len(files), 45),
+                                           height=min(len(self.listFiles), 45),
                                            width=len(legend))
             self.scrollbar.config(command=self.listBox.yview)
             self.scrollbar.pack(side='right', fill='y')
@@ -714,9 +787,10 @@ class guiPlot(Tkinter.Frame):
         container = -1
         self.listAllFiles = []
         print '\033[F',
-        print time.asctime()+' Loading %d relevant files...'%len(files)
-        for _i, fi in enumerate(files):
-            n = int(_i*N/float(len(files))+1)
+        print time.asctime()+' Loading %d relevant files...'%len(self.listFiles)
+        N = self.widthProgressBar
+        for _i, fi in enumerate(self.listFiles):
+            n = int(_i*N/float(len(self.listFiles))+1)
             print '|'+'='*n+' '*(N-n-1)+'|'
             key = os.path.join(self.directory, fi)
             f = fits.open(key)
@@ -803,12 +877,13 @@ class guiPlot(Tkinter.Frame):
         print '\033[F',
         print ''
         print ''
-        if len(files)>0:
+        if len(self.listFiles)>0:
             self.listBox.pack(fill='both', expand=1)
             self.listBox.config(font=self.font, highlightbackground=FG[0][0])
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
         self.listFrame.pack()
+        self.listFrame.after(60000, self.tick)
         return
     def setFileList(self):
         self.filename = []
@@ -835,15 +910,26 @@ class guiPlot(Tkinter.Frame):
             return False
         return True
 
+    def quickViewV2(self):
+        self.setFileList()
+        if not self.setPlotRange():
+            return
+        if self.filename is None:
+            tkMessageBox.showerror('ERROR', 'no file selected')
+            return
+        if not plotGravi(self.filename, v2b=True, **self.plot_opt):
+            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
+        return
+
     def quickViewAll(self):
         self.setFileList()
         if not self.setPlotRange():
             return
         if self.filename is None:
-            tkMessageBox.showerror('ERROR', 'no file(s) selected')
+            tkMessageBox.showerror('ERROR', 'no file selected')
             return
         if not plotGravi(self.filename, **self.plot_opt):
-            tkMessageBox.showerror('ERROR', 'Incorrect file(s) selection')
+            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
     def quickViewSpctr(self):
@@ -851,10 +937,10 @@ class guiPlot(Tkinter.Frame):
         if not self.setPlotRange():
             return
         if self.filename is None:
-            tkMessageBox.showerror('ERROR', 'no file(s) selected')
+            tkMessageBox.showerror('ERROR', 'no file selected')
             return
         if not plotGravi(self.filename, onlySpectrum=True, **self.plot_opt):
-            tkMessageBox.showerror('ERROR', 'Incorrect file(s) selection')
+            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
 
