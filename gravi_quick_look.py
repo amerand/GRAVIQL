@@ -1,10 +1,11 @@
+
 #!/usr/bin/env python
 import warnings
 warnings.filterwarnings('ignore')
 
 import platform, sys, os
 if platform.uname()[1] == 'wvgoff':
-    # -- VLTI Offline Machine:
+    # -- VLTI Offline Machine on Paranal
     sys.path.append('/diska/home/astrov/vltipso/python27/anaconda')
     sys.path = sys.path[::-1]
 
@@ -19,6 +20,10 @@ import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
 import time
 
+__correctP2VMFlux = False
+#if __correctP2VMFlux:
+#    import p2vmCont
+
 #from PIL import ImageTk, Image
 import getpass
 
@@ -31,8 +36,8 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
         #print modeObj
         return None
 
-    for o in ['V2', 'uV2', 'vV2', 
-              'T3', 'u1T3', 'v1T3', 'u2T3', 'v2T3', 
+    for o in ['V2', 'uV2', 'vV2',
+              'T3', 'u1T3', 'v1T3', 'u2T3', 'v2T3',
               'VISPHI', 'uVISPHI', 'vVISPHI']:
         for k in data[0][o].keys():
             for i in range(len(data)):
@@ -40,7 +45,6 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
                     data[i][o][k] = np.array(data[i][o][k])/float(len(data))
                 else:
                     data[0][o][k] += np.array(data[i][o][k])/float(len(data))
-
 
     # -- averaging differential phase, not phase
     if wlmin is None or wlmin<data[0]['wl'].min():
@@ -73,7 +77,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     f = fits.open(filename)
     res = {}
     insnames = []
-    
+
     #print filename
     if 'SC' in insname:
         res['DIAM'] = f[0].header['ESO INS SOBJ DIAMETER']
@@ -142,7 +146,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
         res['V2'][k]  /= float(n)
         res['uV2'][k] /= float(n)
         res['vV2'][k] /= float(n)
-                
+
     # -- T3: ----
     res['T3'] = None
     n = 0.0
@@ -153,7 +157,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                 if res['T3']==None:
                     res['T3'] = {}
                     res['u1T3'],res['v1T3'], res['u2T3'],res['v2T3']  = {}, {}, {}, {}
-                    
+
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
@@ -214,29 +218,43 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                         res['VISPHI'][k][h.data['FLAG'][i]] = np.nan
                         res['uVISPHI'][k] += h.data['UCOORD'][i]
                         res['vVISPHI'][k] += h.data['VCOORD'][i]
-                    n += 1 
+                    n += 1
     for k in res['VISPHI'].keys():
         res['VISPHI'][k] /= float(n)
         res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
         # TODO: unwrap
         res['uVISPHI'][k] /= float(n)
         res['vVISPHI'][k] /= float(n)
-                
+
     # -- Spctr: ----
-    res['FLUX'] = None
+    res['FLUX'] = {}
     n = 0.0
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_FLUX':
             if insname in h.header['INSNAME']:
-                if res['FLUX'] is None:
-                    res['FLUX'] = {oiarray[h.data['STA_INDEX'][i]]:
-                                       h.data['FLUX'][i].copy() for i in range(4)}
+                if len(res['FLUX'])==0:
+                    for i in range(4):
+                        k = oiarray[h.data['STA_INDEX'][i]]
+                        if __correctP2VMFlux:
+                            cont = np.interp(res['wl'],
+                                             p2vmCont.cc[res['SPEC RES'], res['POLA']]['WL'],
+                                             p2vmCont.cc[res['SPEC RES'], res['POLA']]['T%d'%(i+1)])
+                        else:
+                            cont = 1.
+                        res['FLUX'][k] = h.data['FLUX'][i].copy()/cont
                     n += 1
+                    #print res['FLUX'].keys()
                 else:
                     for i in range(4):
                          k = oiarray[h.data['STA_INDEX'][i]]
-                         res['FLUX'][k] += h.data['FLUX'][i]
+                         if __correctP2VMFlux:
+                             cont = np.interp(res['wl'],
+                                              p2vmCont.cc[res['SPEC RES'], res['POLA']]['WL'],
+                                              p2vmCont.cc[res['SPEC RES'], res['POLA']]['T%d'%(i+1)])
+                         else:
+                            cont = 1.
+                         res['FLUX'][k] += h.data['FLUX'][i]/cont
                          n += 1
     for k in res['FLUX'].keys():
         res['FLUX'][k] /= n
@@ -319,10 +337,10 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         plt.close(2)
         plt.figure(2, figsize=(15,5))
     elif v2b:
-        plt.close(0)        
+        plt.close(0)
         plt.figure(0, figsize=(9,9))
     else:
-        plt.close(1)        
+        plt.close(1)
         plt.figure(1, figsize=(15,9))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
@@ -339,7 +357,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
     if v2b:
         for i,k in enumerate(r['V2'].keys()):
             B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
-            plt.plot(B/r['wl'][w], r['V2'][k][w], 
+            plt.plot(B/r['wl'][w], r['V2'][k][w],
                      label=k+' (%5.1fm)'%B,
                      marker='.', linestyle='-')
         plt.legend(loc='upper right')
@@ -367,18 +385,18 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
 
     # -- telluric spectrum
     try:
-        tell = tellTrans(r['wl'][w]/1.00025, width=2.2 if r['SPEC RES']=='HIGH' else 1.2)
+        #tell = tellTrans(r['wl'][w]/1.00025, width=2.2 if r['SPEC RES']=='HIGH' else 1.2)
+        tell = tellTrans(r['wl'][w]/1.00025, width=2.1 if r['SPEC RES']=='HIGH' else 1.4)
     except:
         print 'Warning, could not load telluric spectrum'
         tell = np.ones(len(r['wl'][w]))
-    
+
     # -- fit continnum:
     R = (4000. if r['SPEC RES']=='HIGH' else 500.)
-    cont1 = slidingOp(r['wl'][w], tmp[w]/tell, 0.05)['median']
-    cont2 = slidingOp(r['wl'][w], tmp[w]/tell/cont1, 0.02)['75%']
-    
+    cont1 = slidingOp(r['wl'][w], tmp[w]/tell, 0.1)['median']
+    cont2 = slidingOp(r['wl'][w], tmp[w]/tell/cont1, 0.05)['75%']
     cont = cont1*cont2
-    if onlySpectrum:
+    if True or onlySpectrum:
         #plt.plot(r['wl'][w], tren, '-r', alpha=0.35,
         #         label='trend')
         plt.plot(r['wl'][w], cont, '-g', alpha=0.35,
@@ -420,7 +438,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
         plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
                    linestyle='dashed', label=k)
 
-    plt.legend(loc='lower left', fontsize=7, ncol=2)
+    plt.legend(loc='upper left', fontsize=7, ncol=2)
     plt.hlines(1, wlmin, wlmax, linestyle='dotted')
     if onlySpectrum:
         plt.legend(loc='lower center', fontsize=11, ncol=10)
@@ -557,12 +575,15 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
     plt.xlabel('wavelength (um)')
     plt.xlim(wlmin, wlmax)
     plt.show()
-    return 
+    return
 
 def nanpolyfit(x,y,o):
     x, y = np.array(x), np.array(y)
     w = np.isfinite(x*y)
-    return np.polyfit(x[w], y[w], o)
+    try:
+        return np.polyfit(x[w], y[w], o)
+    except:
+        return [0]
 
 _gray80 = '#BBBBBB'
 _gray30 = '#444444'
@@ -584,16 +605,17 @@ class guiPlot(Tkinter.Frame):
             self.directory = directory
 
         self.mainFrame = None
+        # -- default font
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
-            self.font = tkFont.Font(family='Menlo', size=10)
+            self.font = tkFont.Font(family='Menlo', size=12)
         if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
 
         self.makeMainFrame()
-        
+
 
     def quit(self):
         self.root.destroy()
@@ -628,15 +650,16 @@ class guiPlot(Tkinter.Frame):
                                        h[0].header['ESO PRO CATG']]))
             else:
                 tplid.append('')
-            h.close() 
+            h.close()
             if not quiet:
                 print '\033[F',
         mjdobs = np.array(mjdobs)
-        w = np.where(['GRAVITY' in i and 
-                      '_obs_' in i and 
-                      not '_SKY' in i and 
-                      'VIS_' in i and 
-                      (i.endswith('_RAW') or i.endswith('_CALIBRATED')) for i in tplid])
+        w = np.where([i.startswith('GRAVITY') and
+                      '_obs_' in i and
+                      not '_SKY' in i and
+                      'VIS' in i for i in tplid])
+        # -- debug:
+        #print '-->', tplid
         files = list(np.array(files)[w][np.argsort(mjdobs[w])])
         return files
 
@@ -648,7 +671,7 @@ class guiPlot(Tkinter.Frame):
         self.root.title('GRAVIQL '+os.path.abspath(self.directory))
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
-        
+
         b = Tkinter.Button(self.actFrame, text='CP, dPhi, V2', font=self.font,
                            command = self.quickViewAll)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
@@ -656,7 +679,7 @@ class guiPlot(Tkinter.Frame):
         b = Tkinter.Button(self.actFrame, text='V2(B)', font=self.font,
                            command = self.quickViewV2)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
-        
+
         b = Tkinter.Button(self.actFrame, text='Spectrum',  font=self.font,
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
@@ -711,7 +734,7 @@ class guiPlot(Tkinter.Frame):
         b = Tkinter.Label(self.waveFrame, text='WL range',
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
-        
+
         self.makeFileFrame()
         return
     def tick(self):
@@ -719,7 +742,8 @@ class guiPlot(Tkinter.Frame):
         self.n += 1
         tmp = len(filter(lambda f: f.endswith('fits'), os.listdir(self.directory)))
         if tmp!=self.checkDir:
-            if tkMessageBox.askyesno('GRAVIQL', 'the directory has changed, do you want to update the file list?'):
+            if tkMessageBox.askyesno('GRAVIQL',
+                                     'the directory has changed, do you want to update the file list?'):
                 self.makeFileFrame()
         self.listFrame.after(60000, self.tick)
         return
@@ -744,13 +768,13 @@ class guiPlot(Tkinter.Frame):
             #c.pack(fill='both')
             #self.actFrame.pack(anchor='nw', fill='x')
             #self.waveFrame.pack(anchor='nw', fill='x')
-            
+
         # -- list all files
         self.filename = None
         self.checkList = {}
         self.listFiles = self.get_listFiles()
 
-        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%2.0fms) %3.0f%%(%1.0f) %16s %5s'
+        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%3.0fms) %3.0f%%(%1.0f) %16s %5s'
         legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB)  Date-Obs          LST  '
         #print ''
         #print legend
@@ -843,10 +867,10 @@ class guiPlot(Tkinter.Frame):
                            f[0].header['ESO OBS PROG ID'],
                            container,
                            f[0].header['ESO INS SPEC RES'][:2],
-                           f[0].header['ESO INS POLA MODE'][:3], 
+                           f[0].header['ESO INS POLA MODE'][:3],
                            dit, baseline, seeing, tau0,
                            np.median(FT), max(-1, np.median(T0)),
-                           np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6., 
+                           np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6.,
                            f[0].header['DATE-OBS'][:-3],
                            lst)
 
@@ -891,7 +915,7 @@ class guiPlot(Tkinter.Frame):
         #    if self.checkList[k].get():
         #        self.filename.append(k)
         items = self.listBox.curselection()
-        
+
         self.filename = [self.listAllFiles[i] for i in items]
         return
     def setPlotRange(self):
