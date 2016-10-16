@@ -915,6 +915,8 @@ class guiPlot(Tkinter.Frame):
         #    if self.checkList[k].get():
         #        self.filename.append(k)
         items = self.listBox.curselection()
+        if len(items)>0 and not isinstance(items[0], int):
+            items = map(int, items)
 
         self.filename = [self.listAllFiles[i] for i in items]
         return
