@@ -1,5 +1,6 @@
 
 #!/usr/bin/env python
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -92,12 +93,19 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     res['POLA'] = f[0].header['ESO INS POLA MODE']
     res['DIT'] = f[0].header['ESO DET2 SEQ1 DIT']
     res['BASELINE']= '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
-    if insname=='auto':
+    if insname=='auto_SC':
         if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
            '0.7' in f[0].header['ESO PRO REC1 PIPE ID']:
             insname = 'SPECTRO_SC'+('' if res['POLA']=='COMBINED' else '_P')
         else:
             insname = 'GRAVITY_SC'+('' if res['POLA']=='COMBINED' else '_P')
+    elif insname=='auto_FT':
+        if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
+           '0.7' in f[0].header['ESO PRO REC1 PIPE ID']:
+            insname = 'SPECTRO_FT'+('' if res['POLA']=='COMBINED' else '_P')
+        else:
+            insname = 'GRAVITY_FT'+('' if res['POLA']=='COMBINED' else '_P')
+
     res['INSNAME'] = insname
     # -- wavelength: ----
     for h in f:
@@ -319,7 +327,7 @@ def getYlim(y):
     return np.nanmedian(y) - 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2)),\
            np.nanmedian(y) + 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2))
 
-def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
+def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
               onlySpectrum=False, export=None, v2b=False):
     top = 0
     if isinstance(filename, list) or isinstance(filename, tuple):
@@ -362,6 +370,7 @@ def plotGravi(filename, insname='auto', wlmin=None, wlmax=None,
                      marker='.', linestyle='-')
         plt.legend(loc='upper right')
         plt.show()
+        plt.ylim(0.0,1.0)
         return True
 
     if len(w[0])<len(r['wl'])/3 and not v2b:
@@ -603,17 +612,15 @@ class guiPlot(Tkinter.Frame):
             self.changeDir()
         else:
             self.directory = directory
-
         self.mainFrame = None
         # -- default font
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
             self.font = tkFont.Font(family='Menlo', size=12)
-        if platform.uname()[1]=='wvgoff':
+        elif platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
-
         self.makeMainFrame()
 
 
@@ -688,6 +695,12 @@ class guiPlot(Tkinter.Frame):
                             font=self.font,justify='center', anchor='center')
         b.pack(**bo); b.config(bg=_gray80, fg='#224488')
 
+        self.spectro = Tkinter.StringVar()
+        self.spectro.set('SC') # default value
+
+        b = Tkinter.OptionMenu(self.actFrame, self.spectro, 'SC', 'FT')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
         b = Tkinter.Button(self.actFrame, text='Reload Files', font=self.font,
                            command= self.makeFileFrame)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
@@ -761,8 +774,8 @@ class guiPlot(Tkinter.Frame):
             # -- reload
             for widget in self.listFrame.winfo_children():
                 widget.destroy()
-                self.listFrame.destroy()
-                self.listFrame.pack_forget()
+            self.listFrame.destroy()
+            self.listFrame.pack_forget()
             # -- temporary message:
             #c = Tkinter.Label(self.listwaveFrame, text='Reloading ...')
             #c.pack(fill='both')
@@ -774,8 +787,8 @@ class guiPlot(Tkinter.Frame):
         self.checkList = {}
         self.listFiles = self.get_listFiles()
 
-        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%3.0fms) %3.0f%%(%1.0f) %16s %5s'
-        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB)  Date-Obs          LST  '
+        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%3.0fms) %3.0f%%(%1.0f) %7s  %16s %5s'
+        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB) correction Date-Obs        LST   '
         #print ''
         #print legend
 
@@ -862,6 +875,12 @@ class guiPlot(Tkinter.Frame):
             dit = '%2.0f'%dit if dit>1 else ('%2.1f'%dit)[1:]
             tau0 = '%2.0f'%tau0 if tau0>1 else ('%2.1f'%tau0)[1:]
             seeing = '%3.1f'%seeing if seeing>1 else ('%4.2f'%seeing)[1:]
+
+            # -- reduction parameters:
+            p = {f[0].header[k]:int(k.split('PARAM')[1].split()[0])
+                   for k in f[0].header.keys() if 'ESO PRO REC1 PARAM' in k and 'NAME' in k}
+            p = {k:f[0].header['ESO PRO REC1 PARAM%d VALUE'%p[k]] for k in p.keys()}
+
             text = format%('CAL' if 'Calibrator' in f[0].header['ESO TPL NAME'] else 'SCI',
                            f[0].header['ESO INS SOBJ NAME'][:12]+('*' if 'calibrated' in fi else ' '),
                            f[0].header['ESO OBS PROG ID'],
@@ -871,6 +890,7 @@ class guiPlot(Tkinter.Frame):
                            dit, baseline, seeing, tau0,
                            np.median(FT), max(-1, np.median(T0)),
                            np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6.,
+                           p['vis-correction'],
                            f[0].header['DATE-OBS'][:-3],
                            lst)
 
@@ -943,7 +963,8 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, v2b=True, **self.plot_opt):
+        if not plotGravi(self.filename, v2b=True,
+                        insname='auto_'+self.spectro.get(), **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
@@ -954,7 +975,8 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, **self.plot_opt):
+        if not plotGravi(self.filename, insname='auto_'+self.spectro.get(),
+                        **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
@@ -965,7 +987,8 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, onlySpectrum=True, **self.plot_opt):
+        if not plotGravi(self.filename, onlySpectrum=True,
+                        insname='auto_'+self.spectro.get(), **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
