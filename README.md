@@ -19,6 +19,7 @@ Run [gravi_quick_look.py](gravi_quick_look.py) as a script and select a director
  - See/T0 @V: Seeing (in arcseconds) and Coherence time (in milliseconds), as measured in visible by the observatory's DIMM
  - FT(T0@K): Fraction of reduced frame for the Fringe Tracker, as well as measured coherence time in K band.
  - SC(nB): Fraction of reduced frames for the Science Channel, as well as number of baseline reduced (can be <6 in bad conditions)
+ - Correction: the type of correction applied to the SC data. Can be "NONE" or "V-FACTOR".
  - Date-Obs: UT time and date of observation
  - LST: local sidereal time
 
