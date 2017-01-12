@@ -19,14 +19,16 @@ from matplotlib import pyplot as plt
 from astropy.io import fits
 import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
+import webbrowser
 import time
 
+# -- Obsolete:
 __correctP2VMFlux = False
 #if __correctP2VMFlux:
 #    import p2vmCont
 
-#from PIL import ImageTk, Image
-import getpass
+def openUrl(url):
+    webbrowser.open_new(url)
 
 def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
@@ -346,7 +348,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         plt.figure(2, figsize=(15,5))
     elif v2b:
         plt.close(0)
-        plt.figure(0, figsize=(9,9))
+        plt.figure(0, figsize=(12,8))
     else:
         plt.close(1)
         plt.figure(1, figsize=(15,9))
@@ -366,11 +368,14 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         for i,k in enumerate(r['V2'].keys()):
             B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
             plt.plot(B/r['wl'][w], r['V2'][k][w],
-                     label=k+' (%5.1fm)'%B,
+                     label=k+' (%5.1fm)'%B, alpha=0.5,
                      marker='.', linestyle='-')
+        plt.grid()
         plt.legend(loc='upper right')
+        plt.ylim(0.0, 1.0)
+        plt.xlabel(r'B / M$\lambda$')
+        plt.ylabel('V$^2$')
         plt.show()
-        plt.ylim(0.0,1.0)
         return True
 
     if len(w[0])<len(r['wl'])/3 and not v2b:
@@ -634,6 +639,9 @@ class guiPlot(Tkinter.Frame):
         if not quiet:
             print time.asctime()+' Filtering %d FITS files ...'%len(files)
         files = filter(lambda x: x.endswith('.fits') , files)
+        # KLUDGE!
+        files = filter(lambda x: not x.startswith('r.AMBER') , files)
+
         self.checkDir = len(files)
         N = self.widthProgressBar
         for i, f in enumerate(files):
@@ -691,15 +699,18 @@ class guiPlot(Tkinter.Frame):
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        b = Tkinter.Label(self.actFrame, text='[https://github.com/amerand/GRAVIQL]',
-                            font=self.font,justify='center', anchor='center')
-        b.pack(**bo); b.config(bg=_gray80, fg='#224488')
-
         self.spectro = Tkinter.StringVar()
         self.spectro.set('SC') # default value
-
         b = Tkinter.OptionMenu(self.actFrame, self.spectro, 'SC', 'FT')
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
+        url = 'https://github.com/amerand/GRAVIQL'
+        #b = Tkinter.Label(self.actFrame, text=url, font=self.font,
+        #                    justify='center', anchor='center')
+        b = Tkinter.Button(self.actFrame, text=url,
+                            command=lambda u=url:openUrl(u))
+
+        b.pack(**bo); b.config(bg=_gray80, fg='#224488')
 
         b = Tkinter.Button(self.actFrame, text='Reload Files', font=self.font,
                            command= self.makeFileFrame)
@@ -736,6 +747,12 @@ class guiPlot(Tkinter.Frame):
             b.config(selectcolor=_myorange, fg=_gray80, bg=_gray30)
 
         bo = {'fill':'both', 'side':'right', 'padx':0, 'pady':1}
+
+        # self.spectro = Tkinter.StringVar()
+        # self.spectro.set('SC') # default value
+        # b = Tkinter.OptionMenu(self.waveFrame, self.spectro, 'SC', 'FT')
+        # b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
         b = Tkinter.Label(self.waveFrame, text='um',
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
@@ -890,7 +907,7 @@ class guiPlot(Tkinter.Frame):
                            dit, baseline, seeing, tau0,
                            np.median(FT), max(-1, np.median(T0)),
                            np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6.,
-                           p['vis-correction'],
+                           '', #p['vis-correction'],
                            f[0].header['DATE-OBS'][:-3],
                            lst)
 
