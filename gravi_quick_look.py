@@ -15,12 +15,15 @@ warnings.simplefilter('ignore', np.RankWarning)
 
 import matplotlib
 matplotlib.use('TkAgg')
+import matplotlib
+matplotlib.rcParams['toolbar'] = 'toolbar2'
 from matplotlib import pyplot as plt
 from astropy.io import fits
 import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
 import webbrowser
 import time
+import scipy.special
 
 # -- Obsolete:
 __correctP2VMFlux = False
@@ -329,32 +332,139 @@ def getYlim(y):
     return np.nanmedian(y) - 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2)),\
            np.nanmedian(y) + 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2))
 
+
+def _Vud(base, diam, wavel):
+   """
+   Complex visibility of a uniform disk for parameters:
+   - base in m
+   - diam in mas
+   - wavel in um
+   """
+   x = 0.01523087098933543*diam*base/wavel
+   x += 1e-6*(x==0)
+   return 2*scipy.special.j1(x)/(x)
+
+def Vmodel(r, modelstr):
+    """
+    r is the output of loadGraviMulti or loadGravi
+    """
+    c = np.pi/180/3600000.*1e6
+    res = {'wl':r['wl']}
+    #print 'MODEL:', modelstr
+    if '=' in modelstr:
+        params = {s.split('=')[0].strip():float(s.split('=')[1]) for s in modelstr.upper().split(',')}
+    else:
+        params = {}
+    #print 'WL range:', res['wl'].min(), res['wl'].max()
+    #print 'Params  :', params
+    res['V'], res['V2'], res['uV2'], res['vV2'] = {}, {}, {}, {}
+    res['VISPHI'], res['uVISPHI'], res['vVISPHI'] = {},{},{}
+    res['T3'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{}
+    if 'V2' in r.keys():
+        for k in r['V2'].keys():
+            B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
+            V = r['V2'][k] * 0.0 + 1. + 0j # unresolved object
+            # -- UD
+            if 'UD' in params.keys():
+                V = _Vud(B, params['UD'], res['wl'])*(1.+0j)
+            # -- companion
+            fc = 0.0
+            if 'XC' in params.keys() and 'YC' in params.keys():
+                if not 'FC' in params.keys():
+                    fc = 1.0
+                else:
+                    fc = params['FC']
+                F_ = filter(lambda k: k.startswith('FC_'), params.keys())
+                if len(F_)>0:
+                    for f_ in F_:
+                        wl = float(f_.split('_')[1])
+                        dwl = float(f_.split('_')[2])
+                        fc += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+                if 'UDC' in params.keys():
+                    Vc = _Vud(B, params['UDC'], res['wl'])*(1.+0j)
+                else:
+                    Vc = 1.0+0.0j
+                phi = 2*np.pi*c*(r['uV2'][k]*params['XC']+r['vV2'][k]*params['YC'])/res['wl']
+                V += fc*Vc*np.exp(-1j*phi)
+            # -- fully resolved companions
+            if 'FRES' in params.keys():
+                fres = params['FRES']
+            else:
+                fres = 0.0
+            F_ = filter(lambda k: k.startswith('FRES_'), params.keys())
+            if len(F_)>0:
+                for f_ in F_:
+                    wl = float(f_.split('_')[1])
+                    dwl = float(f_.split('_')[2])
+                    fres += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+            V /= (1.0 + fres + fc)
+
+            res['V'][k] = V # -- keep it for later
+            res['V2'][k] = np.abs(V)**2
+            res['uV2'][k] = r['uV2'][k]
+            res['vV2'][k] = r['vV2'][k]
+
+    if 'VISPHI' in r.keys():
+        for k in res['V'].keys():
+            res['VISPHI'][k] = 180*np.angle(res['V'][k])/np.pi
+    # == TODO: closure phase
+    for k in r['T3'].keys():
+        print k, '=',
+        T = (k[0:2],k[2:4],k[4:6])
+        f = []
+        if T[0]+T[1] in res['VISPHI'].keys():
+            f.append((T[0]+T[1], 1))
+        else:
+            f.append((T[1]+T[0], -1))
+        if T[1]+T[2] in res['VISPHI'].keys():
+            f.append((T[1]+T[2], 1))
+        else:
+            f.append((T[2]+T[1], -1))
+        if T[2]+T[0] in res['VISPHI'].keys():
+            f.append((T[2]+T[0], 1))
+        else:
+            f.append((T[0]+T[2], -1))
+        res['T3'][k] = 0.
+        for x in f:
+            res['T3'][k] += x[1]*res['VISPHI'][x[0]]
+        res['T3'][k] = (res['T3'][k]+180)%360 - 180.
+    return res
+
 def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
-              onlySpectrum=False, export=None, v2b=False):
-    top = 0
+              onlySpectrum=False, export=None, v2b=False, model=''):
+    top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
         if r is None:
             return False
-        top = 0.025*(len(filename)-1)
-        filename = '\n'.join(filename)
+        top = 0.055*(len(filename)//2)
+        tmp = os.path.basename(filename[0])
+        for i,f in enumerate(filename[1:]):
+            tmp += ('\n' if i%2==1 else ';')+os.path.basename(f)
+        filename = tmp
     else:
         r = loadGravi(filename, insname)
+        top += 0.05
+
     if r is None:
         return False
 
     if onlySpectrum:
         plt.close(2)
-        plt.figure(2, figsize=(15,5))
+        plt.figure(2, figsize=(15/1.5,5/1.5))
     elif v2b:
         plt.close(0)
-        plt.figure(0, figsize=(12,8))
+        plt.figure(0, figsize=(12/1.5,8/1.5))
     else:
         plt.close(1)
-        plt.figure(1, figsize=(15,9))
+        plt.figure(1, figsize=(15/1.5,9/1.5))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
-                                           r['OB NAME'], r['INSNAME']]))
+                                           r['OB NAME'], r['INSNAME']]),
+                fontsize=9)
+    # plt.suptitle(' | '.join([r['PROG ID'], str(r['OBS ID']),
+    #                                 r['OB NAME'], r['INSNAME']]),
+    #             fontsize=9)
 
     if wlmin is None or wlmin<r['wl'].min():
         wlmin = r['wl'].min()
@@ -364,11 +474,17 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
     w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
     r['wl band'] = r['wl'][w]
 
+    # -- model!
+    rm = Vmodel(r,model)
+
     if v2b:
         for i,k in enumerate(r['V2'].keys()):
             B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
             plt.plot(B/r['wl'][w], r['V2'][k][w],
                      label=k+' (%5.1fm)'%B, alpha=0.5,
+                     marker='.', linestyle='-')
+            plt.plot(B/rm['wl'][w], rm['V2'][k][w],
+                     color='k', alpha=0.5,
                      marker='.', linestyle='-')
         plt.grid()
         plt.legend(loc='upper right')
@@ -386,12 +502,12 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
     if onlySpectrum:
         ax = plt.subplot(111)
         plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                            wspace=0.1, bottom=0.15, top=0.9-top)
+                            wspace=0.1, bottom=0.15, top=0.95-top)
     else:
         ax = plt.subplot(5,3,1)
         plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                            wspace=0.1, bottom=0.05, top=0.9-top)
-        plt.title('Spectrum and CP (deg % 180)')
+                            wspace=0.1, bottom=0.1, top=0.95-top)
+        plt.title('Spectrum and phase closure (deg)')
 
     tmp = 0
     for T in r['FLUX'].keys():
@@ -489,9 +605,16 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
             plt.plot(r['wl'][w], d4.filter1D(spr, [1,0.9,0.7,0.4,0], order=2),
                     '-', color=(0.8,0.5,0.1))
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.22, linewidth=1,label=B)
+            if not model is '':
+                plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+                         linestyle='steps')
         else:
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
                      linestyle='steps')
+            if not model is '':
+                plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+                         linestyle='steps')
+
             r['V2 band'][B] = r['V2'][B][w]
             if computeDiff:
                 cc = nanpolyfit(r['wl'][wc],r['V2'][B][wc],1)
@@ -510,8 +633,14 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
             plt.title('Diff Phase (deg)')
         if computeDiff:
             cc = nanpolyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
+            if not model is '':
+                ccm = nanpolyfit(rm['wl'][wc],rm['VISPHI'][B][wc], 1)
+
         else:
             cc = nanpolyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
+            if not model is '':
+                ccm = nanpolyfit(rm['wl'][w],rm['VISPHI'][B][w], 1)
+
         r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
         if r['SPEC RES']=='HIGH' and filt:
             spr = r['VISPHI'][B][w]
@@ -527,6 +656,8 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         else:
             plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
                      '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+            plt.plot(rm['wl'][w], rm['VISPHI'][B][w]- np.polyval(ccm, rm['wl'][w]),
+                    '-r', alpha=0.5, linewidth=1, linestyle='steps')
             plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
 
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
@@ -573,6 +704,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
                      linestyle='steps')
+            plt.plot(rm['wl'][w], rm['T3'][B][w], '-r', alpha=0.5, linewidth=1,
+                     linestyle='steps')
+
         r['CP band'][B] = tmp[w]
         if computeDiff:
             cc = nanpolyfit(r['wl'][wc], tmp[wc],1)
@@ -682,6 +816,7 @@ class guiPlot(Tkinter.Frame):
         self.mainFrame = Tkinter.Frame.__init__(self, self.root, bg=_gray30)
         self.waveFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.actFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
+        self.modelFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.listFrame = None
         self.root.title('GRAVIQL '+os.path.abspath(self.directory))
 
@@ -765,6 +900,15 @@ class guiPlot(Tkinter.Frame):
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
+        self.modelStr = Tkinter.StringVar()
+        self.modelStr.set('ud=1.0') # default value
+        b = Tkinter.Entry(self.modelFrame, textvariable=self.modelStr,
+                          width=110, font=self.font)
+        b.pack(**bo)
+
+        b = Tkinter.Label(self.modelFrame, text='Visibility Model:',
+                          bg=_gray30, fg=_gray80, font=self.font)
+        b.pack(**bo)
         self.makeFileFrame()
         return
     def tick(self):
@@ -817,6 +961,7 @@ class guiPlot(Tkinter.Frame):
             c.pack(fill='both')
             self.actFrame.pack(anchor='nw', fill='x')
             self.waveFrame.pack(anchor='nw', fill='x')
+            self.modelFrame.pack(anchor='nw', fill='x')
             self.listFrame.pack()
             return
         else:
@@ -943,6 +1088,7 @@ class guiPlot(Tkinter.Frame):
             self.listBox.config(font=self.font, highlightbackground=FG[0][0])
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
+        self.modelFrame.pack(anchor='nw', fill='x')
         self.listFrame.pack()
         self.listFrame.after(60000, self.tick)
         return
@@ -980,7 +1126,7 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, v2b=True,
+        if not plotGravi(self.filename, v2b=True, model=self.modelStr.get(),
                         insname='auto_'+self.spectro.get(), **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
@@ -993,7 +1139,7 @@ class guiPlot(Tkinter.Frame):
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
         if not plotGravi(self.filename, insname='auto_'+self.spectro.get(),
-                        **self.plot_opt):
+                        model=self.modelStr.get(), **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
@@ -1004,7 +1150,7 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, onlySpectrum=True,
+        if not plotGravi(self.filename, onlySpectrum=True, model=self.modelStr.get(),
                         insname='auto_'+self.spectro.get(), **self.plot_opt):
             tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
