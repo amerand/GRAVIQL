@@ -15,20 +15,42 @@ warnings.simplefilter('ignore', np.RankWarning)
 
 import matplotlib
 matplotlib.use('TkAgg')
-import matplotlib
 matplotlib.rcParams['toolbar'] = 'toolbar2'
 from matplotlib import pyplot as plt
+plt.ion()
 from astropy.io import fits
 import cPickle
 import Tkinter, tkFileDialog, tkMessageBox, tkFont
 import webbrowser
 import time
 import scipy.special
+import scipy.signal
 
 # -- Obsolete:
 __correctP2VMFlux = False
 #if __correctP2VMFlux:
 #    import p2vmCont
+
+Vmodel_info = """Coma-separated destription of the visibility model:
+
+    all fluxes assume f=1 (primary)
+
+    - 'ud=1.0' uniform disk diameter, in mas
+    - 'f=1.0' continuum flux of the primary (default is 1.0)
+    - 'f_2.166_0.002=0.1' gaussian emission (centered 2.166um, fwhm=0.002um)
+    - 'fres=0.1' continuum resolved flux
+    - 'fres_2.166_0.002=0.1' gaussian spectral emission (centered 2.166um, fwhm=0.002um)
+        of resolved flux
+    - 'udc=1.0, xc=1.0, yc=1.2, fc=0.1' uniform disk diameter of a companion,
+        at -1.0mas towards east and 1.2 mas towards north. companion flux is 0.1
+    - 'fc_2.166_0.002=0.1': gaussian line (centered 2.166um, fwhm=0.002um) for the
+        companion flux
+
+    gaussian feature: 'dg' (size) 'xg', 'yg' (position), 'fg' (flux) and 'fg_...'
+    for emmission / absorption lines.
+    """
+
+graviqlmod = '.graviqlmod'
 
 def openUrl(url):
     webbrowser.open_new(url)
@@ -76,7 +98,6 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
                 else:
                     data[0][o][k] += (data[i][o][k] - np.polyval(cc, data[0]['wl'] -
                                         0.5*(wlmin+wlmax)))/float(len(data))
-
     return data[0]
 
 def loadGravi(filename, insname='GRAVITY_SC'):
@@ -125,7 +146,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
 
     # -- oi array: ----
     oiarray = dict(zip(f['OI_ARRAY'].data['STA_INDEX'],
-                       f['OI_ARRAY'].data['STA_NAME']))
+                        np.char.strip(f['OI_ARRAY'].data['STA_NAME'])))
     # -- V2: ----
     res['V2'] = None
     n = 0.0
@@ -328,9 +349,13 @@ def tellTrans(wl, width=2.3):
         res.append(np.mean(__tran[ np.abs(__lbda-wl[i])<width*gwl[i]/2 ]))
     return np.array(res)
 
-def getYlim(y):
-    return np.nanmedian(y) - 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2)),\
-           np.nanmedian(y) + 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2))
+def getYlim(y, centered=False):
+    if centered:
+        return np.nanmedian(y) - 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2)),\
+            np.nanmedian(y) + 1.5*(np.nanpercentile(y,98)-np.nanpercentile(y,2))
+    else:
+        r = np.nanpercentile(y,99)-np.nanpercentile(y,1)
+        return np.nanpercentile(y,1)-0.2*r, np.nanpercentile(y,99)+0.2*r
 
 
 def _Vud(base, diam, wavel):
@@ -344,94 +369,175 @@ def _Vud(base, diam, wavel):
    x += 1e-6*(x==0)
    return 2*scipy.special.j1(x)/(x)
 
-def Vmodel(r, modelstr):
+def Vmodel(r, modelstr, target=None):
     """
     r is the output of loadGraviMulti or loadGravi
+    modelstr is a coma separated destriction of the model, see Vmodel_info
     """
+    # -- load model dict
+    try:
+        f = open(graviqlmod)
+        mod = cPickle.load(f)
+        f.close()
+    except:
+        mod = {}
+
+    if modelstr=='' and target in mod.keys():
+        # -- get model from memory
+        modelstr = mod[target]
+    else:
+        # -- update/add model in memory
+        mod[target] = modelstr
+        f = open(graviqlmod, 'w')
+        cPickle.dump(mod, f, 2)
+        f.close()
+
+    # -- WARNING: I am not sure of the differential phase sign
+    _s = 1 # or -1?
+
     c = np.pi/180/3600000.*1e6
-    res = {'wl':r['wl']}
+    res = {'wl':r['wl'], 'modelstr':modelstr}
     #print 'MODEL:', modelstr
     if '=' in modelstr:
         params = {s.split('=')[0].strip():float(s.split('=')[1]) for s in modelstr.upper().split(',')}
     else:
         params = {}
-    #print 'WL range:', res['wl'].min(), res['wl'].max()
-    #print 'Params  :', params
     res['V'], res['V2'], res['uV2'], res['vV2'] = {}, {}, {}, {}
     res['VISPHI'], res['uVISPHI'], res['vVISPHI'] = {},{},{}
     res['T3'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{}
+
+    # -- primary flux
+    if not 'F' in params.keys():
+        f = 0.0 # assumes no flux
+    else:
+        f = params['F']
+
+    F_ = filter(lambda k: k.startswith('F_'), params.keys())
+    if len(F_)>0:
+        for f_ in F_:
+            wl = float(f_.split('_')[1])
+            dwl = float(f_.split('_')[2])
+            f += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+    else:
+        # -- case no lines and no flux is given, but a diameter
+        if not 'F' in params.keys() and 'UD' in params.keys():
+            f = 1.0
+
+    #ck = filter(lambda x: x=='FC' or (x[:2]=='FC' and x[2:].isdigit()), params.keys())
+    # -- looks for flux definition
+
+    # -- companion flux
+    if not 'FC' in params.keys():
+        fc = 1.0 # assume equal companion
+    else:
+        fc = params['FC']
+    F_ = filter(lambda k: k.startswith('FC_'), params.keys())
+    if len(F_)>0:
+        for f_ in F_:
+            wl = float(f_.split('_')[1])
+            dwl = float(f_.split('_')[2])
+            fc += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+
+    # -- gaussian flux
+    if not 'FG' in params.keys():
+        fg = 0.0 # assume null flux
+    else:
+        fg = params['FG']
+    F_ = filter(lambda k: k.startswith('FG_'), params.keys())
+    if len(F_)>0:
+        for f_ in F_:
+            wl = float(f_.split('_')[1])
+            dwl = float(f_.split('_')[2])
+            fg += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+
+    # -- fully resolved component flux
+    if 'FRES' in params.keys():
+        fres = params['FRES']
+    else:
+        fres = 0.0
+    F_ = filter(lambda k: k.startswith('FRES_'), params.keys())
+    if len(F_)>0:
+        for f_ in F_:
+            wl = float(f_.split('_')[1])
+            dwl = float(f_.split('_')[2])
+            fres += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
+
     if 'V2' in r.keys():
         for k in r['V2'].keys():
             B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
-            V = r['V2'][k] * 0.0 + 1. + 0j # unresolved object
-            # -- UD
+            # --  primary
+            V = f + 0j # unresolved object
             if 'UD' in params.keys():
-                V = _Vud(B, params['UD'], res['wl'])*(1.+0j)
-            # -- companion
-            fc = 0.0
+                V = f*_Vud(B, params['UD'], res['wl'])*(1.+0j)
+
+            # -- secondary star
             if 'XC' in params.keys() and 'YC' in params.keys():
-                if not 'FC' in params.keys():
-                    fc = 1.0
-                else:
-                    fc = params['FC']
-                F_ = filter(lambda k: k.startswith('FC_'), params.keys())
-                if len(F_)>0:
-                    for f_ in F_:
-                        wl = float(f_.split('_')[1])
-                        dwl = float(f_.split('_')[2])
-                        fc += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
                 if 'UDC' in params.keys():
                     Vc = _Vud(B, params['UDC'], res['wl'])*(1.+0j)
                 else:
                     Vc = 1.0+0.0j
-                phi = 2*np.pi*c*(r['uV2'][k]*params['XC']+r['vV2'][k]*params['YC'])/res['wl']
-                V += fc*Vc*np.exp(-1j*phi)
-            # -- fully resolved companions
-            if 'FRES' in params.keys():
-                fres = params['FRES']
+                phic = -_s*2*np.pi*c*(r['uV2'][k]*params['XC']+r['vV2'][k]*params['YC'])/res['wl']
+                V += fc*Vc*np.exp(1j*phic)
             else:
-                fres = 0.0
-            F_ = filter(lambda k: k.startswith('FRES_'), params.keys())
-            if len(F_)>0:
-                for f_ in F_:
-                    wl = float(f_.split('_')[1])
-                    dwl = float(f_.split('_')[2])
-                    fres += params[f_]*np.exp(-4*np.log(2)*(res['wl']-wl)**2/dwl**2)
-            V /= (1.0 + fres + fc)
+                fc = 0.0
 
+            # -- gaussian
+            if 'DG' in params.keys():
+                Vg = np.exp(-(np.pi*c*params['DG']*B/res['wl'])**2/(4*np.log(2)))
+            else:
+                Vg = 0.0
+            if 'XG' in params.keys() and 'YG' in params.keys():
+                phig = -_s*2*np.pi*c*(r['uV2'][k]*params['XG']+r['vV2'][k]*params['YG'])/res['wl']
+            else:
+                phig = 0.
+            V += fg*Vg*np.exp(1j*phig)
+
+            V /= (f + fres + fc + fg)
             res['V'][k] = V # -- keep it for later
             res['V2'][k] = np.abs(V)**2
             res['uV2'][k] = r['uV2'][k]
             res['vV2'][k] = r['vV2'][k]
 
+    # -- normalized Spectrum:
+    if isinstance(f + fres + fc + fg, np.ndarray):
+        res['FLUX'] = f + fres + fc + fg
+        # -- crude normalization
+        res['FLUX'] /= np.median(res['FLUX'])
+    else:
+        res['FLUX'] = np.ones(len(res['wl']))
+
     if 'VISPHI' in r.keys():
         for k in res['V'].keys():
             res['VISPHI'][k] = 180*np.angle(res['V'][k])/np.pi
-    # == TODO: closure phase
+
     for k in r['T3'].keys():
-        print k, '=',
-        T = (k[0:2],k[2:4],k[4:6])
+        T = (k[0:2],k[2:4],k[4:6]) # -- three telescpoes
         f = []
+        # -- compute formula for closure phase
         if T[0]+T[1] in res['VISPHI'].keys():
-            f.append((T[0]+T[1], 1))
+            f.append((T[0]+T[1], _s))
         else:
-            f.append((T[1]+T[0], -1))
+            f.append((T[1]+T[0], - _s))
+
         if T[1]+T[2] in res['VISPHI'].keys():
-            f.append((T[1]+T[2], 1))
+            f.append((T[1]+T[2], _s))
         else:
-            f.append((T[2]+T[1], -1))
+            f.append((T[2]+T[1], - _s))
+
         if T[2]+T[0] in res['VISPHI'].keys():
-            f.append((T[2]+T[0], 1))
+            f.append((T[2]+T[0], _s))
         else:
-            f.append((T[0]+T[2], -1))
+            f.append((T[0]+T[2], - _s))
+        # -- signed sum
         res['T3'][k] = 0.
         for x in f:
             res['T3'][k] += x[1]*res['VISPHI'][x[0]]
-        res['T3'][k] = (res['T3'][k]+180)%360 - 180.
+        res['T3'][k] = (res['T3'][k]+180.)%360. - 180.
     return res
 
-def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
-              onlySpectrum=False, export=None, v2b=False, model=''):
+def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
+              onlySpectrum=False, exportFilename='', v2b=False, model=''):
+    #print '#'*5, exportFilename, '#'*5
     top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
@@ -474,8 +580,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
     w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
     r['wl band'] = r['wl'][w]
 
-    # -- model!
-    rm = Vmodel(r,model)
+    # -- compute Vsibility model
+    rm = Vmodel(r,model, r['TARG NAME'])
+    model = rm['modelstr']
 
     if v2b:
         for i,k in enumerate(r['V2'].keys()):
@@ -491,9 +598,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         plt.ylim(0.0, 1.0)
         plt.xlabel(r'B / M$\lambda$')
         plt.ylabel('V$^2$')
-        plt.show()
-        return True
+        return model
 
+    # -- decide whether or not we compute differential quantities
     if len(w[0])<len(r['wl'])/3 and not v2b:
         computeDiff = True
     else:
@@ -539,6 +646,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
 
     plt.plot(r['wl'][w], tmp[w], '-k', label='normalized spectrum',
              alpha=0.7, linewidth=1, linestyle='steps')
+
     # -- remove continuum
     wc =  np.where((r['wl']<=wlmax)*(r['wl']>=wlmin)*
                    (np.abs(r['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin))  )
@@ -570,22 +678,37 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
 
     plt.legend(loc='upper left', fontsize=7, ncol=2)
     plt.hlines(1, wlmin, wlmax, linestyle='dotted')
+
+    if not model is '':
+        plt.plot(rm['wl'][w], rm['FLUX'][w], '-r', alpha=0.5, linewidth=1,
+                 linestyle='steps')
+
     if onlySpectrum:
         plt.legend(loc='lower center', fontsize=11, ncol=10)
         plt.xlabel('wavelength (um)')
         plt.xlim(wlmin, wlmax)
         plt.ylim(0, 1.05*tmp[w].max())
-        plt.show()
-        return
+        #plt.show()
+        return model
+
     ax.xaxis.grid()
 
-    filt = False
     if filt:
         import d4
     # -- V2 and visPHI ----
     r['V2 band'] = {}
     r['dV2 band'] = {}
     r['dPHI band'] = {}
+    r['CP band'] = {}
+    r['dCP band'] = {}
+
+    if not model is '':
+        rm['V2 band'] = {}
+        rm['dV2 band'] = {}
+        rm['dPHI band'] = {}
+        rm['CP band'] = {}
+        rm['dCP band'] = {}
+
     for i,B in enumerate(r['V2'].keys()):
         axv = plt.subplot(6,3,3+3*i, sharex=ax)
         if i==0:
@@ -596,29 +719,33 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
             r['V2'][B][j] = np.median(r['V2'][B][max(j-7, 0):
                                                 min(j+7, len(r['V2'][B])-1)])
 
+        filtV = np.linspace(1,0,8)**0.5
+        filtO = 16
         if r['SPEC RES']=='HIGH' and filt:
+            print '--smoothing--'
             spr = r['V2'][B][w]
+            spr = removenans(rm['wl'][w], spr)
             # -- sigma clipping
             #tmp = slidingOp(r['wl'][w], spr, 0.05)
             #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
             #spr[w_] = tmp['median'][w_]
-            plt.plot(r['wl'][w], d4.filter1D(spr, [1,0.9,0.7,0.4,0], order=2),
-                    '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.22, linewidth=1,label=B)
+            plt.plot(r['wl'][w], d4.filter1D(spr, filtV, order=filtO), '-k', alpha=0.8, linewidth=1)
+            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.3, linewidth=1,label=B)
             if not model is '':
                 plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
                          linestyle='steps')
         else:
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
                      linestyle='steps')
-            if not model is '':
-                plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
-                         linestyle='steps')
 
             r['V2 band'][B] = r['V2'][B][w]
             if computeDiff:
                 cc = nanpolyfit(r['wl'][wc],r['V2'][B][wc],1)
                 r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
+        if not model is '':
+            plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+                     linestyle='steps')
+
 
         for k in lines.keys():
             plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
@@ -632,33 +759,42 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         if i==0:
             plt.title('Diff Phase (deg)')
         if computeDiff:
+            # -- fit slope at edges
             cc = nanpolyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
             if not model is '':
                 ccm = nanpolyfit(rm['wl'][wc],rm['VISPHI'][B][wc], 1)
 
         else:
+            # -- fit global slope
             cc = nanpolyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
             if not model is '':
-                ccm = nanpolyfit(rm['wl'][w],rm['VISPHI'][B][w], 1)
+                ccm = nanpolyfit(rm['wl'][w], rm['VISPHI'][B][w], 1)
 
+        # -- store result in another variable
         r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
+        if not model is '':
+            rm['dPHI band'][B] = rm['VISPHI'][B][w] - np.polyval(ccm, rm['wl'][w])
+
         if r['SPEC RES']=='HIGH' and filt:
-            spr = r['VISPHI'][B][w]
+            print '--smoothing--'
+            spr = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
+            spr = removenans(rm['wl'][w], spr)
             # -- sigma clipping
             #tmp = slidingOp(r['wl'][w], spr, 0.05)
             #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
             #spr[w_] = tmp['median'][w_]
-            spr = d4.filter1D(spr, [0,1,0.9,0.7,0.4,0], order=2)
-            plt.plot(r['wl'][w], spr, '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]),
-                     '-k', alpha=0.22, linewidth=1, label=B)
-            plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(c, r['wl'][w]) ))
+            spr = d4.filter1D(spr, filtV, order=filtO)
+            plt.plot(r['wl'][w], spr, '-k', linewidth=1, alpha=0.8)
+            plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]),
+                     '-k', alpha=0.3, linewidth=1, label=B)
+            plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
         else:
-            plt.plot(r['wl'][w], r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w]),
+            plt.plot(r['wl'][w], r['dPHI band'][B],
                      '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
-            plt.plot(rm['wl'][w], rm['VISPHI'][B][w]- np.polyval(ccm, rm['wl'][w]),
-                    '-r', alpha=0.5, linewidth=1, linestyle='steps')
-            plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
+        if not model is '':
+            plt.plot(rm['wl'][w], rm['dPHI band'][B],
+                '-r', alpha=0.5, linewidth=1, linestyle='steps')
+        plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
 
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
         for k in lines.keys():
@@ -669,11 +805,8 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
     axv.set_xlabel('wavelength (um)')
     axp.set_xlabel('wavelength (um)')
     # -- T3 ----
-    r['CP band'] = {}
-    r['dCP band'] = {}
     for i,B in enumerate(r['T3'].keys()):
         axx = plt.subplot(5,3,4+3*i, sharex=ax)
-
         if True:
             tmp = r['T3'][B]
         else:
@@ -688,29 +821,36 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
                          label='>90')
 
         if r['SPEC RES']=='HIGH' and filt:
-            s, c = np.sin(np.pi*r['T3'][B]/180), np.cos(np.pi*r['T3'][B]/180)
+            print '--smoothing--'
+            s, c = np.sin(np.pi*r['T3'][B]/180.), np.cos(np.pi*r['T3'][B]/180.)
+            s = removenans(rm['wl'], s)
+            c = removenans(rm['wl'], c)
             # -- sigma clipping
             #ts, tc = slidingOp(r['wl'], s, 0.05), slidingOp(r['wl'], c, 0.05)
             #w_ = np.where(np.abs(s-ts['median'])>3*ts['1sigma'])
             #s[w_] = ts['median'][w_]
             #w_ = np.where(np.abs(s-tc['median'])>3*tc['1sigma'])
             #c[w_] = tc['median'][w_]
-            s = d4.filter1D(s, [1,1,1,0.7,0.2,0], order=2)[w]
-            c = d4.filter1D(c, [1,1,1,0.7,0.2,0], order=2)[w]
+            s = d4.filter1D(s, filtV, order=filtO)[w]
+            c = d4.filter1D(c, filtV, order=filtO)[w]
             a = np.arctan2(s,c)*180/np.pi
             a = (a+90)%180-90
-            plt.plot(r['wl'][w], a, '-', color=(0.8,0.5,0.1))
-            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.22, linewidth=1, label=B)
+            plt.plot(r['wl'][w], a, '-k', alpha=0.8, linewidth=1)
+            plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.3, linewidth=1, label=B)
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
                      linestyle='steps')
+        if not model is '':
             plt.plot(rm['wl'][w], rm['T3'][B][w], '-r', alpha=0.5, linewidth=1,
-                     linestyle='steps')
+                linestyle='steps')
 
         r['CP band'][B] = tmp[w]
         if computeDiff:
-            cc = nanpolyfit(r['wl'][wc], tmp[wc],1)
+            cc = nanpolyfit(r['wl'][wc], tmp[wc], 1)
             r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
+            if not model is '':
+                ccm = nanpolyfit(rm['wl'][wc], rm['T3'][B][wc], 1)
+                rm['dCP band'][B] = rm['T3'][B][w] - np.polyval(ccm, r['wl'][w])
 
         plt.ylim(getYlim(tmp[w]))
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
@@ -722,8 +862,24 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None,
         plt.legend(loc='upper left', fontsize=8, ncol=1)
     plt.xlabel('wavelength (um)')
     plt.xlim(wlmin, wlmax)
-    plt.show()
-    return
+    print 'done'
+    if not exportFilename is '':
+        print 'exporting to', exportFilename, '(open with cPickle)'
+        f = open(exportFilename, 'wb')
+        cPickle.dump(r, f, 2)
+        f.close()
+    #plt.show()
+    return model
+
+def removenans(x,y,n=5):
+    x, y = np.array(x), np.array(y)
+    w = np.isfinite(x*y)
+    yp = np.zeros(len(y))
+    s = scipy.signal.medfilt(y[w], n)
+    wn = np.isnan(x*y)
+    yp[wn] = np.interp(x[wn], x[w], s)
+    yp[w] = y[w]
+    return yp
 
 def nanpolyfit(x,y,o):
     x, y = np.array(x), np.array(y)
@@ -742,6 +898,8 @@ _myLightblue = '#44BBFF'
 _myLightorange = '#FFBB44'
 
 class guiPlot(Tkinter.Frame):
+    export = False # -- enable the export menu:
+    smooth = False # -- smoothing of high-res data
     def __init__(self,root, directory=None):
         self.root = root
         self.widthProgressBar = 80
@@ -761,7 +919,6 @@ class guiPlot(Tkinter.Frame):
             # -- Paranal VLTI offline machine
             self.font = None
         self.makeMainFrame()
-
 
     def quit(self):
         self.root.destroy()
@@ -786,6 +943,7 @@ class guiPlot(Tkinter.Frame):
                 h = fits.open(os.path.join(self.directory, f))
             except:
                 continue
+            # -- must be from GRAVITY
             if 'INSTRUME' in h[0].header and \
                     h[0].header['INSTRUME']!='GRAVITY':
                 h.close()
@@ -803,10 +961,12 @@ class guiPlot(Tkinter.Frame):
             if not quiet:
                 print '\033[F',
         mjdobs = np.array(mjdobs)
-        w = np.where([i.startswith('GRAVITY') and
-                      '_obs_' in i and
-                      not '_SKY' in i and
-                      'VIS' in i for i in tplid])
+        #print tplid
+        w = np.where([i.startswith('GRAVITY') and # -- GRAVITY template
+                      '_obs_' in i and # -- an observation (not a calibration)
+                      not '_SKY' in i and # -- not a sky
+                      'VIS' in i # -- visibilities (not dark, etc.)
+                      for i in tplid])
         # -- debug:
         #print '-->', tplid
         files = list(np.array(files)[w][np.argsort(mjdobs[w])])
@@ -817,6 +977,8 @@ class guiPlot(Tkinter.Frame):
         self.waveFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.actFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.modelFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
+        if self.export:
+            self.exportFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
         self.listFrame = None
         self.root.title('GRAVIQL '+os.path.abspath(self.directory))
 
@@ -900,15 +1062,31 @@ class guiPlot(Tkinter.Frame):
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
+        # -- input for visibility model
         self.modelStr = Tkinter.StringVar()
-        self.modelStr.set('ud=1.0') # default value
+        self.modelStr.set('') # default value
+
         b = Tkinter.Entry(self.modelFrame, textvariable=self.modelStr,
-                          width=110, font=self.font)
+                          width=115, font=self.font)
         b.pack(**bo)
 
         b = Tkinter.Label(self.modelFrame, text='Visibility Model:',
                           bg=_gray30, fg=_gray80, font=self.font)
+
         b.pack(**bo)
+
+        if self.export:
+            self.exportStr = Tkinter.StringVar()
+            self.exportStr.set('filename.dpy') # default value
+            b = Tkinter.Entry(self.exportFrame, textvariable=self.exportStr,
+                              width=100, font=self.font)
+            b.pack(**bo)
+
+            b = Tkinter.Label(self.exportFrame, text='export to binary file:',
+                              bg=_gray30, fg=_gray80, font=self.font)
+
+            b.pack(**bo)
+
         self.makeFileFrame()
         return
     def tick(self):
@@ -962,6 +1140,9 @@ class guiPlot(Tkinter.Frame):
             self.actFrame.pack(anchor='nw', fill='x')
             self.waveFrame.pack(anchor='nw', fill='x')
             self.modelFrame.pack(anchor='nw', fill='x')
+            if self.export:
+                self.exportFrame.pack(anchor='nw', fill='x')
+
             self.listFrame.pack()
             return
         else:
@@ -1089,6 +1270,9 @@ class guiPlot(Tkinter.Frame):
         self.actFrame.pack(anchor='nw', fill='x')
         self.waveFrame.pack(anchor='nw', fill='x')
         self.modelFrame.pack(anchor='nw', fill='x')
+        if self.export:
+            self.exportFrame.pack(anchor='nw', fill='x')
+
         self.listFrame.pack()
         self.listFrame.after(60000, self.tick)
         return
@@ -1126,9 +1310,14 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, v2b=True, model=self.modelStr.get(),
-                        insname='auto_'+self.spectro.get(), **self.plot_opt):
-            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
+        test = plotGravi(self.filename, v2b=True, model=self.modelStr.get(),
+                        insname='auto_'+self.spectro.get(), filt=self.smooth,
+                        exportFilename='' if not self.export else self.exportStr.get(),
+                        **self.plot_opt)
+        #print 'TEST:', test
+        if isinstance(test, str):
+            self.modelStr.set(test)
+        #tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
     def quickViewAll(self):
@@ -1138,9 +1327,14 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, insname='auto_'+self.spectro.get(),
-                        model=self.modelStr.get(), **self.plot_opt):
-            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
+        test = plotGravi(self.filename, insname='auto_'+self.spectro.get(),
+                        model=self.modelStr.get(), filt=self.smooth,
+                        exportFilename='' if not self.export else self.exportStr.get(),
+                        **self.plot_opt)
+        #print 'TEST:', test
+        if isinstance(test, str):
+            self.modelStr.set(test)
+        #tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
     def quickViewSpctr(self):
@@ -1150,11 +1344,16 @@ class guiPlot(Tkinter.Frame):
         if self.filename is None:
             tkMessageBox.showerror('ERROR', 'no file selected')
             return
-        if not plotGravi(self.filename, onlySpectrum=True, model=self.modelStr.get(),
-                        insname='auto_'+self.spectro.get(), **self.plot_opt):
-            tkMessageBox.showerror('ERROR', 'Incorrect file selection')
-        return
+        test = plotGravi(self.filename, onlySpectrum=True, model=self.modelStr.get(),
+                        insname='auto_'+self.spectro.get(), filt=self.smooth,
+                        exportFilename='' if not self.export else self.exportStr.get(),
+                         **self.plot_opt)
+        #print 'TEST:', test
+        if isinstance(test, str):
+            self.modelStr.set(test)
 
+        #tkMessageBox.showerror('ERROR', 'Incorrect file selection')
+        return
 
 if __name__=='__main__':
     root = Tkinter.Tk()
