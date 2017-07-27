@@ -912,10 +912,13 @@ class guiPlot(Tkinter.Frame):
         self.mainFrame = None
         # -- default font
         self.font = tkFont.Font(family='courier', size=12)
-        if platform.uname()[0]=='Darwin':
-            # -- Mac OS
-            self.font = tkFont.Font(family='Menlo', size=12)
-        elif platform.uname()[1]=='wvgoff':
+        self.minifont = tkFont.Font(family='courier', size=10, weight=tkFont.BOLD)
+
+        # if platform.uname()[0]=='Darwin':
+        #     # -- Mac OS
+        #     self.font = tkFont.Font(family='Monaco', size=12)
+        #     self.minifont = tkFont.Font(family='Monaco', size=10)
+        if platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
         self.makeMainFrame()
@@ -1013,7 +1016,7 @@ class guiPlot(Tkinter.Frame):
                            command= self.makeFileFrame)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
-        b = Tkinter.Button(self.actFrame, text='Change Directory', font=self.font,
+        b = Tkinter.Button(self.actFrame, text='Change Dir.', font=self.font,
                            command= self.changeDir)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
@@ -1067,10 +1070,11 @@ class guiPlot(Tkinter.Frame):
         self.modelStr.set('') # default value
 
         b = Tkinter.Entry(self.modelFrame, textvariable=self.modelStr,
-                          width=115, font=self.font)
+                          width=145, font=self.minifont)
+
         b.pack(**bo)
 
-        b = Tkinter.Label(self.modelFrame, text='Visibility Model:',
+        b = Tkinter.Label(self.modelFrame, text='Model:',
                           bg=_gray30, fg=_gray80, font=self.font)
 
         b.pack(**bo)
