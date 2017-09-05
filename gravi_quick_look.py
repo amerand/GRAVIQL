@@ -538,12 +538,12 @@ def Vmodel(r, modelstr, target=None):
 def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
               onlySpectrum=False, exportFilename='', v2b=False, model=''):
     #print '#'*5, exportFilename, '#'*5
-    top = 0.1
+    top = 0.06
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
         if r is None:
             return False
-        top = 0.055*(len(filename)//2)
+        top += 0.05*(len(filename)//2)
         tmp = os.path.basename(filename[0])
         for i,f in enumerate(filename[1:]):
             tmp += ('\n' if i%2==1 else ';')+os.path.basename(f)
@@ -555,15 +555,16 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     if r is None:
         return False
 
+    _scale = 0.7
     if onlySpectrum:
         plt.close(2)
-        plt.figure(2, figsize=(15/1.5,5/1.5))
+        plt.figure(2, figsize=(15*_scale ,5*_scale))
     elif v2b:
         plt.close(0)
-        plt.figure(0, figsize=(12/1.5,8/1.5))
+        plt.figure(0, figsize=(12*_scale ,8*_scale))
     else:
         plt.close(1)
-        plt.figure(1, figsize=(15/1.5,9/1.5))
+        plt.figure(1, figsize=(15*_scale ,9*_scale))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
                                            r['OB NAME'], r['INSNAME']]),
@@ -862,7 +863,6 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         plt.legend(loc='upper left', fontsize=8, ncol=1)
     plt.xlabel('wavelength (um)')
     plt.xlim(wlmin, wlmax)
-    print 'done'
     if not exportFilename is '':
         print 'exporting to', exportFilename, '(open with cPickle)'
         f = open(exportFilename, 'wb')
