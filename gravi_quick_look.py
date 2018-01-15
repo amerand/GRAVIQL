@@ -59,7 +59,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     data = [loadGravi(f, insname=insname) for f in filenames]
     # check if all observations done for sma object in spectro same mode
     modeObj = set(['-'.join([d['TARG NAME'],d['SPEC RES'],
-                          d['POLA'],d['BASELINE']]) for d in data])
+                            d['POLA'],d['BASELINE']]) for d in data])
     if len(modeObj)!=1:
         #print modeObj
         return None
@@ -119,15 +119,16 @@ def loadGravi(filename, insname='GRAVITY_SC'):
     res['POLA'] = f[0].header['ESO INS POLA MODE']
     res['DIT'] = f[0].header['ESO DET2 SEQ1 DIT']
     res['BASELINE']= '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
+    res['PIPELINE'] = f[0].header['ESO PRO REC1 PIPE ID']
     if insname=='auto_SC':
-        if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
-           '0.7' in f[0].header['ESO PRO REC1 PIPE ID']:
+        if ' 0.8' in res['PIPELINE'] or\
+           ' 0.7' in res['PIPELINE']:
             insname = 'SPECTRO_SC'+('' if res['POLA']=='COMBINED' else '_P')
         else:
             insname = 'GRAVITY_SC'+('' if res['POLA']=='COMBINED' else '_P')
     elif insname=='auto_FT':
-        if '0.8' in f[0].header['ESO PRO REC1 PIPE ID'] or\
-           '0.7' in f[0].header['ESO PRO REC1 PIPE ID']:
+        if ' 0.8' in res['PIPELINE'] or\
+           ' 0.7' in res['PIPELINE']:
             insname = 'SPECTRO_FT'+('' if res['POLA']=='COMBINED' else '_P')
         else:
             insname = 'GRAVITY_FT'+('' if res['POLA']=='COMBINED' else '_P')
@@ -141,7 +142,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                 res['wl'] = h.data['EFF_WAVE']*1e6
             insnames.append(h.header['INSNAME'])
     if not 'wl' in res.keys():
-        #print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
+        print 'ERROR: could no find INSNAME="'+insname+'" within:', insnames
         return
 
     # -- oi array: ----
@@ -538,12 +539,12 @@ def Vmodel(r, modelstr, target=None):
 def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
               onlySpectrum=False, exportFilename='', v2b=False, model=''):
     #print '#'*5, exportFilename, '#'*5
-    top = 0.06
+    top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
         if r is None:
             return False
-        top += 0.05*(len(filename)//2)
+        top = 0.055*(len(filename)//2)
         tmp = os.path.basename(filename[0])
         for i,f in enumerate(filename[1:]):
             tmp += ('\n' if i%2==1 else ';')+os.path.basename(f)
@@ -555,16 +556,15 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     if r is None:
         return False
 
-    _scale = 0.7
     if onlySpectrum:
         plt.close(2)
-        plt.figure(2, figsize=(15*_scale ,5*_scale))
+        plt.figure(2, figsize=(15/1.5,5/1.5))
     elif v2b:
         plt.close(0)
-        plt.figure(0, figsize=(12*_scale ,8*_scale))
+        plt.figure(0, figsize=(12/1.5,8/1.5))
     else:
         plt.close(1)
-        plt.figure(1, figsize=(15*_scale ,9*_scale))
+        plt.figure(1, figsize=(15/1.5,9/1.5))
     plt.clf()
     plt.suptitle(filename+'\n'+' | '.join([r['PROG ID'], str(r['OBS ID']),
                                            r['OB NAME'], r['INSNAME']]),
@@ -595,7 +595,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
                      color='k', alpha=0.5,
                      marker='.', linestyle='-')
         plt.grid()
-        plt.legend(loc='upper right')
+        plt.legend(loc='upper right', fontsize=7)
         plt.ylim(0.0, 1.0)
         plt.xlabel(r'B / M$\lambda$')
         plt.ylabel('V$^2$')
@@ -677,7 +677,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
                    linestyle='dashed', label=k)
 
-    plt.legend(loc='upper left', fontsize=7, ncol=2)
+    plt.legend(loc='upper left', fontsize=5)
     plt.hlines(1, wlmin, wlmax, linestyle='dotted')
 
     if not model is '':
@@ -753,7 +753,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
                        linestyle='dashed')
         tmp = getYlim(r['V2'][B][w])
         plt.ylim(max(tmp[0], 0), tmp[1])
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        plt.legend(loc='upper left', fontsize=7, ncol=1)
         axv.xaxis.grid()
         # -- visphi
         axp = plt.subplot(6,3,2+3*i, sharex=ax)
@@ -801,7 +801,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         for k in lines.keys():
             plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
                        linestyle='dashed')
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        plt.legend(loc='upper left', fontsize=7, ncol=1)
         axp.xaxis.grid()
     axv.set_xlabel('wavelength (um)')
     axp.set_xlabel('wavelength (um)')
@@ -860,9 +860,10 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
                        linestyle='dashed')
 
         axx.xaxis.grid()
-        plt.legend(loc='upper left', fontsize=8, ncol=1)
+        plt.legend(loc='upper left', fontsize=7, ncol=1)
     plt.xlabel('wavelength (um)')
     plt.xlim(wlmin, wlmax)
+    print 'done'
     if not exportFilename is '':
         print 'exporting to', exportFilename, '(open with cPickle)'
         f = open(exportFilename, 'wb')
@@ -912,13 +913,10 @@ class guiPlot(Tkinter.Frame):
         self.mainFrame = None
         # -- default font
         self.font = tkFont.Font(family='courier', size=12)
-        self.minifont = tkFont.Font(family='courier', size=10, weight=tkFont.BOLD)
-
-        # if platform.uname()[0]=='Darwin':
-        #     # -- Mac OS
-        #     self.font = tkFont.Font(family='Monaco', size=12)
-        #     self.minifont = tkFont.Font(family='Monaco', size=10)
-        if platform.uname()[1]=='wvgoff':
+        if platform.uname()[0]=='Darwin':
+            # -- Mac OS
+            self.font = tkFont.Font(family='Menlo', size=12)
+        elif platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
         self.makeMainFrame()
@@ -1016,7 +1014,7 @@ class guiPlot(Tkinter.Frame):
                            command= self.makeFileFrame)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
-        b = Tkinter.Button(self.actFrame, text='Change Dir.', font=self.font,
+        b = Tkinter.Button(self.actFrame, text='Change Directory', font=self.font,
                            command= self.changeDir)
         b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
@@ -1070,11 +1068,10 @@ class guiPlot(Tkinter.Frame):
         self.modelStr.set('') # default value
 
         b = Tkinter.Entry(self.modelFrame, textvariable=self.modelStr,
-                          width=145, font=self.minifont)
-
+                          width=115, font=self.font)
         b.pack(**bo)
 
-        b = Tkinter.Label(self.modelFrame, text='Model:',
+        b = Tkinter.Label(self.modelFrame, text='Visibility Model:',
                           bg=_gray30, fg=_gray80, font=self.font)
 
         b.pack(**bo)
