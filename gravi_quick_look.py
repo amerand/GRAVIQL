@@ -83,7 +83,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
     if (wlmax-wlmin)<data[0]['wl'].ptp()/3.:
         # -- remove continuum, using sides as continnum
         wc =  np.where( (data[0]['wl']<=wlmax)*(data[0]['wl']>=wlmin)*
-                    (np.abs(data[0]['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin)))
+                        (np.abs(data[0]['wl'] - 0.5*(wlmin+wlmax)) > 0.33*(wlmax-wlmin)))
     else:
         wc = np.where(data[0]['wl'])
     for o in ['VISPHI']: # for each baseline
@@ -147,10 +147,10 @@ def loadGravi(filename, insname='GRAVITY_SC'):
 
     # -- oi array: ----
     oiarray = dict(zip(f['OI_ARRAY'].data['STA_INDEX'],
-                        np.char.strip(f['OI_ARRAY'].data['STA_NAME'])))
+                    np.char.strip(f['OI_ARRAY'].data['STA_NAME'])))
     # -- V2: ----
     res['V2'] = None
-    n = 0.0
+    n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_VIS2':
@@ -163,28 +163,30 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['V2'][k] = h.data['VIS2DATA'][i].copy()
-                        res['V2'][k][h.data['FLAG'][i]] = np.nan
                         res['uV2'][k] = h.data['UCOORD'][i].copy()
                         res['vV2'][k] = h.data['VCOORD'][i].copy()
-                    n += 1
+                        n[k] = np.ones(len(res['V2'][k]))
+                        n[k][h.data['FLAG'][i]] = 0.0
+                    n['all'] += 1.0
                 else:
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        res['V2'][k] += h.data['VIS2DATA'][i]
-                        res['V2'][k][h.data['FLAG'][i]] = np.nan
+                        res['V2'][k][~h.data['FLAG'][i]] += h.data['VIS2DATA'][i][~h.data['FLAG'][i]]
                         res['uV2'][k] += h.data['UCOORD'][i].copy()
                         res['vV2'][k] += h.data['VCOORD'][i].copy()
-                    n += 1
+                        n[k][~h.data['FLAG'][i]] += 1.0
+                    n['all'] += 1.0
 
     for k in res['V2'].keys():
-        res['V2'][k]  /= float(n)
-        res['uV2'][k] /= float(n)
-        res['vV2'][k] /= float(n)
+        res['V2'][k]  /= n[k]
+        res['V2'][k][n[k]==0] = np.nan
+        res['uV2'][k] /= float(n['all'])
+        res['vV2'][k] /= float(n['all'])
 
     # -- T3: ----
     res['T3'] = None
-    n = 0.0
+    n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_T3':
@@ -198,37 +200,40 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
                         res['T3'][k] = h.data['T3PHI'][i].copy()
-                        res['T3'][k][h.data['FLAG'][i]] = np.nan
+                        res['T3'][k][h.data['FLAG'][i]] = 0.0
                         res['u1T3'][k] = h.data['U1COORD'][i].copy()
                         res['v1T3'][k] = h.data['V1COORD'][i].copy()
                         res['u2T3'][k] = h.data['U2COORD'][i].copy()
                         res['v2T3'][k] = h.data['V2COORD'][i].copy()
-                    n += 1.0
+                        n[k] = np.ones(len(res['T3'][k]))
+                        n[k][h.data['FLAG'][i]] = 0.0
+                    n['all'] += 1.0
                 else:
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
-                        res['T3'][k] +=  h.data['T3PHI'][i]
-                        res['T3'][k][h.data['FLAG'][i]] = np.nan
+                        res['T3'][k][~h.data['FLAG'][i]] += h.data['T3PHI'][i][~h.data['FLAG'][i]]
                         res['u1T3'][k] += h.data['U1COORD'][i].copy()
                         res['v1T3'][k] += h.data['V1COORD'][i].copy()
                         res['u2T3'][k] += h.data['U2COORD'][i].copy()
                         res['v2T3'][k] += h.data['V2COORD'][i].copy()
-                    n += 1.0
+                        n[k][~h.data['FLAG'][i]] += 1.0
+                    n['all'] += 1.0
 
     for k in res['T3'].keys():
-        res['T3'][k]  /= float(n)
+        res['T3'][k] /= n[k]
+        res['T3'][k][n[k]==0] = np.nan
         res['T3'][k] = (res['T3'][k]+180)%360 - 180
         # TODO: unwrap
-        res['u1T3'][k] /= n
-        res['v1T3'][k] /= n
-        res['u2T3'][k] /= n
-        res['v2T3'][k] /= n
+        res['u1T3'][k] /= n['all']
+        res['v1T3'][k] /= n['all']
+        res['u2T3'][k] /= n['all']
+        res['v2T3'][k] /= n['all']
 
     # -- diff Phase ---
     res['VISPHI'] = None
-    n = 0.0
+    n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in h.header.keys() and \
             h.header['EXTNAME'] == 'OI_VIS':
@@ -241,25 +246,26 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['VISPHI'][k] = h.data['VISPHI'][i].copy()
-                        res['VISPHI'][k][h.data['FLAG'][i]] = np.nan
                         res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
                         res['vVISPHI'][k] = h.data['VCOORD'][i].copy()
-                    n += 1
+                        n[k] = np.ones(len(res['VISPHI'][k]))
+                        n[k][h.data['FLAG'][i]] = 0.0
+                    n['all'] += 1
                 else:
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        res['VISPHI'][k] += h.data['VISPHI'][i]
-                        res['VISPHI'][k][h.data['FLAG'][i]] = np.nan
+                        res['VISPHI'][k][~h.data['FLAG'][i]] += h.data['VISPHI'][i][~h.data['FLAG'][i]]
                         res['uVISPHI'][k] += h.data['UCOORD'][i]
                         res['vVISPHI'][k] += h.data['VCOORD'][i]
-                    n += 1
+                        n[k][~h.data['FLAG'][i]] += 1.0
+                    n['all'] += 1
     for k in res['VISPHI'].keys():
-        res['VISPHI'][k] /= float(n)
+        res['VISPHI'][k] /= n[k]
         res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
         # TODO: unwrap
-        res['uVISPHI'][k] /= float(n)
-        res['vVISPHI'][k] /= float(n)
+        res['uVISPHI'][k] /= float(n['all'])
+        res['vVISPHI'][k] /= float(n['all'])
 
     # -- Spctr: ----
     res['FLUX'] = {}
@@ -537,7 +543,8 @@ def Vmodel(r, modelstr, target=None):
     return res
 
 def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
-              onlySpectrum=False, exportFilename='', v2b=False, model=''):
+              onlySpectrum=False, exportFilename='', v2b=False, model='',
+              withdPhi=False):
     #print '#'*5, exportFilename, '#'*5
     top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
@@ -612,7 +619,10 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
                             wspace=0.1, bottom=0.15, top=0.95-top)
     else:
-        ax = plt.subplot(5,3,1)
+        if withdPhi:
+            ax = plt.subplot(5,3,1)
+        else:
+            ax = plt.subplot(5,2,1)
         plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
                             wspace=0.1, bottom=0.1, top=0.95-top)
         plt.title('Spectrum and phase closure (deg)')
@@ -711,7 +721,11 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         rm['dCP band'] = {}
 
     for i,B in enumerate(r['V2'].keys()):
-        axv = plt.subplot(6,3,3+3*i, sharex=ax)
+        if withdPhi:
+            axv = plt.subplot(6,3,3+3*i, sharex=ax)
+        else:
+            axv = plt.subplot(6,2,2+2*i, sharex=ax)
+
         if i==0:
             plt.title('V2')
 
@@ -756,58 +770,64 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         plt.legend(loc='upper left', fontsize=7, ncol=1)
         axv.xaxis.grid()
         # -- visphi
-        axp = plt.subplot(6,3,2+3*i, sharex=ax)
-        if i==0:
-            plt.title('Diff Phase (deg)')
-        if computeDiff:
-            # -- fit slope at edges
-            cc = nanpolyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
+        if withdPhi:
+            axp = plt.subplot(6,3,2+3*i, sharex=ax)
+            if i==0:
+                plt.title('Diff Phase (deg)')
+            if computeDiff:
+                # -- fit slope at edges
+                cc = nanpolyfit(r['wl'][wc],r['VISPHI'][B][wc], 1)
+                if not model is '':
+                    ccm = nanpolyfit(rm['wl'][wc],rm['VISPHI'][B][wc], 1)
+
+            else:
+                # -- fit global slope
+                cc = nanpolyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
+                if not model is '':
+                    ccm = nanpolyfit(rm['wl'][w], rm['VISPHI'][B][w], 1)
+
+            # -- store result in another variable
+            r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
             if not model is '':
-                ccm = nanpolyfit(rm['wl'][wc],rm['VISPHI'][B][wc], 1)
+                rm['dPHI band'][B] = rm['VISPHI'][B][w] - np.polyval(ccm, rm['wl'][w])
 
-        else:
-            # -- fit global slope
-            cc = nanpolyfit(r['wl'][w], r['VISPHI'][B][w] , 1)
+            if r['SPEC RES']=='HIGH' and filt:
+                print '--smoothing--'
+                spr = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
+                spr = removenans(rm['wl'][w], spr)
+                # -- sigma clipping
+                #tmp = slidingOp(r['wl'][w], spr, 0.05)
+                #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
+                #spr[w_] = tmp['median'][w_]
+                spr = d4.filter1D(spr, filtV, order=filtO)
+                plt.plot(r['wl'][w], spr, '-k', linewidth=1, alpha=0.8)
+                plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]),
+                         '-k', alpha=0.3, linewidth=1, label=B)
+                plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
+            else:
+                plt.plot(r['wl'][w], r['dPHI band'][B],
+                         '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
             if not model is '':
-                ccm = nanpolyfit(rm['wl'][w], rm['VISPHI'][B][w], 1)
+                plt.plot(rm['wl'][w], rm['dPHI band'][B],
+                    '-r', alpha=0.5, linewidth=1, linestyle='steps')
+            plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
 
-        # -- store result in another variable
-        r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
-        if not model is '':
-            rm['dPHI band'][B] = rm['VISPHI'][B][w] - np.polyval(ccm, rm['wl'][w])
-
-        if r['SPEC RES']=='HIGH' and filt:
-            print '--smoothing--'
-            spr = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
-            spr = removenans(rm['wl'][w], spr)
-            # -- sigma clipping
-            #tmp = slidingOp(r['wl'][w], spr, 0.05)
-            #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
-            #spr[w_] = tmp['median'][w_]
-            spr = d4.filter1D(spr, filtV, order=filtO)
-            plt.plot(r['wl'][w], spr, '-k', linewidth=1, alpha=0.8)
-            plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]),
-                     '-k', alpha=0.3, linewidth=1, label=B)
-            plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
-        else:
-            plt.plot(r['wl'][w], r['dPHI band'][B],
-                     '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
-        if not model is '':
-            plt.plot(rm['wl'][w], rm['dPHI band'][B],
-                '-r', alpha=0.5, linewidth=1, linestyle='steps')
-        plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
-
-        plt.hlines(0, wlmin, wlmax, linestyle='dotted')
-        for k in lines.keys():
-            plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
-                       linestyle='dashed')
-        plt.legend(loc='upper left', fontsize=7, ncol=1)
-        axp.xaxis.grid()
+            plt.hlines(0, wlmin, wlmax, linestyle='dotted')
+            for k in lines.keys():
+                plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
+                           linestyle='dashed')
+            plt.legend(loc='upper left', fontsize=7, ncol=1)
+            axp.xaxis.grid()
     axv.set_xlabel('wavelength (um)')
-    axp.set_xlabel('wavelength (um)')
+    if withdPhi:
+        axp.set_xlabel('wavelength (um)')
     # -- T3 ----
     for i,B in enumerate(r['T3'].keys()):
-        axx = plt.subplot(5,3,4+3*i, sharex=ax)
+        if withdPhi:
+            axx = plt.subplot(5,3,4+3*i, sharex=ax)
+        else:
+            axx = plt.subplot(5,2,3+2*i, sharex=ax)
+
         if True:
             tmp = r['T3'][B]
         else:
@@ -915,7 +935,9 @@ class guiPlot(Tkinter.Frame):
         self.font = tkFont.Font(family='courier', size=12)
         if platform.uname()[0]=='Darwin':
             # -- Mac OS
-            self.font = tkFont.Font(family='Menlo', size=12)
+            #self.font = tkFont.Font(family='Monaco', size=14)
+            self.font = tkFont.Font(family='Andale Mono', size=14)
+
         elif platform.uname()[1]=='wvgoff':
             # -- Paranal VLTI offline machine
             self.font = None
@@ -989,6 +1011,10 @@ class guiPlot(Tkinter.Frame):
                            command = self.quickViewAll)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
+        b = Tkinter.Button(self.actFrame, text='CP, V2', font=self.font,
+                           command = self.quickViewCPV2)
+        b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
+
         b = Tkinter.Button(self.actFrame, text='V2(B)', font=self.font,
                            command = self.quickViewV2)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
@@ -996,11 +1022,6 @@ class guiPlot(Tkinter.Frame):
         b = Tkinter.Button(self.actFrame, text='Spectrum',  font=self.font,
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
-
-        self.spectro = Tkinter.StringVar()
-        self.spectro.set('SC') # default value
-        b = Tkinter.OptionMenu(self.actFrame, self.spectro, 'SC', 'FT')
-        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
         url = 'https://github.com/amerand/GRAVIQL'
         #b = Tkinter.Label(self.actFrame, text=url, font=self.font,
@@ -1022,14 +1043,14 @@ class guiPlot(Tkinter.Frame):
                            command= self.quit)
         b.pack(**bo); b.config(bg=_crimson, fg='#000000')
 
-        modes = [('Full Range',  'None None'),
+        modes = [('Full',  'None None'),
                  #('High SNR',  '2.05 2.42'),
                  ('HeI 2.058', '2.038 2.078'),
                  ('MgII 2.140','2.130 2.150'),
                  ('Brg 2.166', '2.136 2.196'),
                  ('NaI 2.206', '2.198 2.218'),
                  ('NIII 2.249',  '2.237 2.261'),
-                 ('CO bands',    '2.28 None')]
+                 ('CO',    '2.28 None')]
 
         bo = {'fill':'both', 'side':'left', 'padx':1, 'pady':1}
         self.wlrange = Tkinter.StringVar()
@@ -1046,10 +1067,18 @@ class guiPlot(Tkinter.Frame):
 
         bo = {'fill':'both', 'side':'right', 'padx':0, 'pady':1}
 
-        # self.spectro = Tkinter.StringVar()
-        # self.spectro.set('SC') # default value
-        # b = Tkinter.OptionMenu(self.waveFrame, self.spectro, 'SC', 'FT')
-        # b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
+        # self.withdPhi = Tkinter.StringVar()
+        # self.withdPhi.set('with dPhi') # default value
+        # b = Tkinter.OptionMenu(self.waveFrame, self.withdPhi, 'with dPhi', 'without')
+        # b.pack(**bo);
+        # b.config(bg=_gray80, fg=_myorange)
+
+        self.spectro = Tkinter.StringVar()
+        self.spectro.set('SC') # default value
+        b = Tkinter.OptionMenu(self.waveFrame, self.spectro, 'SC', 'FT')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
+
 
         b = Tkinter.Label(self.waveFrame, text='um',
                           bg=_gray30, fg=_gray80, font=self.font)
@@ -1063,6 +1092,8 @@ class guiPlot(Tkinter.Frame):
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
+
+
         # -- input for visibility model
         self.modelStr = Tkinter.StringVar()
         self.modelStr.set('') # default value
@@ -1071,7 +1102,7 @@ class guiPlot(Tkinter.Frame):
                           width=115, font=self.font)
         b.pack(**bo)
 
-        b = Tkinter.Label(self.modelFrame, text='Visibility Model:',
+        b = Tkinter.Label(self.modelFrame, text='Vis. Model:',
                           bg=_gray30, fg=_gray80, font=self.font)
 
         b.pack(**bo)
@@ -1127,8 +1158,8 @@ class guiPlot(Tkinter.Frame):
         self.checkList = {}
         self.listFiles = self.get_listFiles()
 
-        format = '%3s %-13s %-13s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%3.0fms) %3.0f%%(%1.0f) %7s  %16s %5s'
-        legend = '     Object       Prog ID      Contain.  Mode  DIT Baseline   See/T0 @V   FT(T0@K)  SC(nB) correction Date-Obs        LST   '
+        _format = '%3s %-13s %14s %7d %2s/%3s %ss %11s %3s"/%2sms %3.0f%%(%3.0fms) %3.0f%%(%1.0f) %7s  %16s %5s %5s'
+        _legend = '     Object       Prog ID    Contain.  Mode  DIT  Baseline   See/T0 @V   FT(T0@K)   SC(nB) corr.    Date-Obs          LST  Pipe'
         #print ''
         #print legend
 
@@ -1149,12 +1180,12 @@ class guiPlot(Tkinter.Frame):
         else:
             self.listFrame = Tkinter.Frame(self.mainFrame, bg=_gray30)
             self.scrollbar = Tkinter.Scrollbar(self.listFrame, orient='vertical')
-            c = Tkinter.Label(self.listFrame, text=legend, bg=_gray30, fg=_gray80, font=self.font)
+            c = Tkinter.Label(self.listFrame, text=_legend, bg=_gray30, fg=_gray80, font=self.font)
             c.pack(fill='both')
             self.listBox = Tkinter.Listbox(self.listFrame, selectmode='multiple',
                                            yscrollcommand=self.scrollbar.set,
                                            height=min(len(self.listFiles), 45),
-                                           width=len(legend))
+                                           width=len(_legend)+5)
             self.scrollbar.config(command=self.listBox.yview)
             self.scrollbar.pack(side='right', fill='y')
 
@@ -1225,7 +1256,7 @@ class guiPlot(Tkinter.Frame):
                    for k in f[0].header.keys() if 'ESO PRO REC1 PARAM' in k and 'NAME' in k}
             p = {k:f[0].header['ESO PRO REC1 PARAM%d VALUE'%p[k]] for k in p.keys()}
 
-            text = format%('CAL' if 'Calibrator' in f[0].header['ESO TPL NAME'] else 'SCI',
+            text = _format%('CAL' if 'Calibrator' in f[0].header['ESO TPL NAME'] else 'SCI',
                            f[0].header['ESO INS SOBJ NAME'][:12]+('*' if 'calibrated' in fi else ' '),
                            f[0].header['ESO OBS PROG ID'],
                            container,
@@ -1236,7 +1267,8 @@ class guiPlot(Tkinter.Frame):
                            np.median(SC), np.sum(np.array(SC)>0)/float(len(SC))*6.,
                            '', #p['vis-correction'],
                            f[0].header['DATE-OBS'][:-3],
-                           lst)
+                           lst,
+                           f[0].header['ESO PRO REC1 PIPE ID'].split()[-1])
 
             f.close()
 
@@ -1331,6 +1363,25 @@ class guiPlot(Tkinter.Frame):
         test = plotGravi(self.filename, insname='auto_'+self.spectro.get(),
                         model=self.modelStr.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
+                        withdPhi = True,
+                        **self.plot_opt)
+        #print 'TEST:', test
+        if isinstance(test, str):
+            self.modelStr.set(test)
+        #tkMessageBox.showerror('ERROR', 'Incorrect file selection')
+        return
+
+    def quickViewCPV2(self):
+        self.setFileList()
+        if not self.setPlotRange():
+            return
+        if self.filename is None:
+            tkMessageBox.showerror('ERROR', 'no file selected')
+            return
+        test = plotGravi(self.filename, insname='auto_'+self.spectro.get(),
+                        model=self.modelStr.get(), filt=self.smooth,
+                        exportFilename='' if not self.export else self.exportStr.get(),
+                        withdPhi = False,
                         **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
@@ -1348,11 +1399,11 @@ class guiPlot(Tkinter.Frame):
         test = plotGravi(self.filename, onlySpectrum=True, model=self.modelStr.get(),
                         insname='auto_'+self.spectro.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
+                        withdPhi = self.withdPhi.get()=='with dPhi',
                          **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
             self.modelStr.set(test)
-
         #tkMessageBox.showerror('ERROR', 'Incorrect file selection')
         return
 
