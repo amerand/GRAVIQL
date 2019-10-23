@@ -651,11 +651,6 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
     if wlmax is None or wlmax>r['wl'].max():
         wlmax = r['wl'].max()
     
-    r['bwidth']=r['wl'].copy()
-    for i in range(r['bwidth'].size-1):
-      r['bwidth'][i+1]-=r['wl'][i]
-    r['bwidth'][0]=r['bwidth'][1]
-    r['wl']-=r['bwidth'] # wavelength is for the center of the 'step' plotted channels
     w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
     r['wl band'] = r['wl'][w]
 
@@ -730,7 +725,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
     tmp[w] /= tell*cont
 
     plt.plot(r['wl'][w], tmp[w], '-k', label='normalized spectrum',
-             alpha=0.7, linewidth=1, linestyle='steps')
+             alpha=0.7, linewidth=1, drawstyle='steps-mid')
 
     # -- remove continuum
     wc =  np.where((r['wl']<=wlmax)*(r['wl']>=wlmin)*
@@ -767,7 +762,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
 
     if not model is '':
         plt.plot(rm['wl'][w], rm['FLUX'][w], '-r', alpha=0.5, linewidth=1,
-                 linestyle='steps')
+                 drawstyle='steps-mid')
 
     if onlySpectrum:
         plt.legend(loc='lower center', fontsize=11, ncol=10)
@@ -828,14 +823,14 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.3, linewidth=1,label=B)
             if not model is '':
                 plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
-                         linestyle='steps')
+                         drawstyle='steps-mid')
         else:
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
-                     linestyle='steps')
+                     drawstyle='steps-mid')
 
             if doErr:
-                plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, r['V2'][B][w], yerr=r['V2ERR'][B][w],
-                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+                plt.errorbar(r['wl'][w], r['V2'][B][w], yerr=r['V2ERR'][B][w],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, drawstyle='steps-mid')
 
             r['V2 band'][B] = r['V2'][B][w]
             if computeDiff:
@@ -843,7 +838,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
                 r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
         if not model is '':
             plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
-                     linestyle='steps')
+                     drawstyle='steps-mid')
 
 
         for k in list(lines.keys()):
@@ -893,14 +888,14 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
                 #plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
             
             plt.plot(r['wl'][w], r['dPHI band'][B],
-                     '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+                     '-k', alpha=0.5, linewidth=1, label=B, drawstyle='steps-mid')
             if doErr:
-              plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, r['dPHI band'][B], yerr=r['dPHIerr band'][B],
-                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+              plt.errorbar(r['wl'][w], r['dPHI band'][B], yerr=r['dPHIerr band'][B],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, drawstyle='steps-mid')
 
             if not model is '':
                 plt.plot(rm['wl'][w], rm['dPHI band'][B],
-                    '-r', alpha=0.5, linewidth=1, linestyle='steps')
+                    '-r', alpha=0.5, linewidth=1, drawstyle='steps-mid')
             plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
 
             plt.hlines(0, wlmin, wlmax, linestyle='dotted')
@@ -956,13 +951,13 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.3, linewidth=1, label=B)
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
-                     linestyle='steps')
+                     drawstyle='steps-mid')
             if doErr:
-                plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, tmp[w], yerr=r['T3PHIERR'][B][w],
-                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+                plt.errorbar(r['wl'][w], tmp[w], yerr=r['T3PHIERR'][B][w],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, drawstyle='steps-mid')
         if not model is '':
             plt.plot(rm['wl'][w], rm['T3PHI'][B][w], '-r', alpha=0.5, linewidth=1,
-                linestyle='steps')
+                drawstyle='steps-mid')
 
         r['CP band'][B] = tmp[w]
         if computeDiff:
