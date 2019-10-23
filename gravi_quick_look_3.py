@@ -70,7 +70,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
         return None
 
     # -- averages, stored in first file
-    for o in ['V2', 'T3', 'VISPHI']:
+    for o in ['V2', 'T3PHI', 'VISPHI']:
         for k in list(data[0][o].keys()): # -- for each baseline
             for i in range(len(data)): # -- for each data file
                 if i==0:
@@ -179,14 +179,17 @@ def loadGravi(filename, insname='GRAVITY_SC'):
             if insname in h.header['INSNAME']:
                 if res['V2'] is None:
                     res['V2'] = {}
+                    res['V2ERR'] = {}
                     res['uV2'] = {}
                     res['vV2'] = {}
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VIS2DATA'][i])
+                        flag = h.data['FLAG'][i] + np.isnan(h.data['VIS2DATA'][i]) + np.isnan(h.data['VIS2ERR'][i])
                         res['V2'][k] = h.data['VIS2DATA'][i].copy()
-                        res['V2'][k][flag] = 0.0
+                        res['V2ERR'][k] = pow(h.data['VIS2ERR'][i].copy(),2)
+                        res['V2'][k][flag] = np.nan
+                        res['V2ERR'][k][flag] = np.nan
                         res['uV2'][k] = h.data['UCOORD'][i].copy()
                         res['vV2'][k] = h.data['VCOORD'][i].copy()
                         n[k] = np.ones(len(res['V2'][k]))
@@ -198,39 +201,45 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                             oiarray[h.data['STA_INDEX'][i][1]]
                         flag = h.data['FLAG'][i] + np.isnan(h.data['VIS2DATA'][i])
                         res['V2'][k][~flag] += h.data['VIS2DATA'][i][~flag]
+                        res['V2ERR'][k][~flag] += pow(h.data['VIS2ERR'][i][~flag],2)
                         res['uV2'][k] += h.data['UCOORD'][i].copy()
                         res['vV2'][k] += h.data['VCOORD'][i].copy()
                         n[k][~flag] += 1.0
                     n['all'] += 1.0
     for k in list(res['V2'].keys()):
         res['V2'][k]  /= n[k]
+        res['V2ERR'][k]  /= n[k]
+        res['V2ERR'][k] = pow(res['V2ERR'][k],0.5)
         res['V2'][k][n[k]==0] = np.nan
+        res['V2ERR'][k][n[k]==0] = np.nan
         res['uV2'][k] /= float(n['all'])
         res['vV2'][k] /= float(n['all'])
 
-    # -- T3: ----
-    res['T3'] = None
+    # -- T3PHI: ----
+    res['T3PHI'] = None
     n = {'all':0.0} # average counter
     for h in f:
         if 'EXTNAME' in list(h.header.keys()) and \
             h.header['EXTNAME'] == 'OI_T3':
             if insname in h.header['INSNAME']:
-                if res['T3']==None:
-                    res['T3'] = {}
+                if res['T3PHI']==None:
+                    res['T3PHI'], res['T3PHIERR'] = {},{}
                     res['u1T3'],res['v1T3'], res['u2T3'],res['v2T3']  = {}, {}, {}, {}
 
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
-                        res['T3'][k] = h.data['T3PHI'][i].copy()
-                        flag = h.data['FLAG'][i] + np.isnan(res['T3'][k])
-                        res['T3'][k][flag] = 0.0 # no data
+                        res['T3PHI'][k] = h.data['T3PHI'][i].copy()
+                        res['T3PHIERR'][k] = pow(h.data['T3PHIERR'][i].copy(),2)
+                        flag = h.data['FLAG'][i] + np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k])
+                        res['T3PHI'][k][flag] = np.nan # no data
+                        res['T3PHIERR'][k][flag] = np.nan # no data
                         res['u1T3'][k] = h.data['U1COORD'][i].copy()
                         res['v1T3'][k] = h.data['V1COORD'][i].copy()
                         res['u2T3'][k] = h.data['U2COORD'][i].copy()
                         res['v2T3'][k] = h.data['V2COORD'][i].copy()
-                        n[k] = np.ones(len(res['T3'][k]))
+                        n[k] = np.ones(len(res['T3PHI'][k]))
                         n[k][flag] = 0.0 # no part of average
                     n['all'] += 1.0
                 else:
@@ -238,18 +247,22 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
-                        flag = h.data['FLAG'][i] + np.isnan(res['T3'][k])
-                        res['T3'][k][~flag] += h.data['T3PHI'][i][~flag]
+                        flag = h.data['FLAG'][i] + np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k])
+                        res['T3PHI'][k][~flag] += h.data['T3PHI'][i][~flag]
+                        res['T3PHIERR'][k][~flag] += pow(h.data['T3PHI'][i][~flag],2)
                         res['u1T3'][k] += h.data['U1COORD'][i].copy()
                         res['v1T3'][k] += h.data['V1COORD'][i].copy()
                         res['u2T3'][k] += h.data['U2COORD'][i].copy()
                         res['v2T3'][k] += h.data['V2COORD'][i].copy()
                         n[k][~flag] += 1.0
                     n['all'] += 1.0
-    for k in list(res['T3'].keys()):
-        res['T3'][k] /= n[k]
-        res['T3'][k][n[k]==0] = np.nan
-        res['T3'][k] = (res['T3'][k]+180)%360 - 180
+    for k in list(res['T3PHI'].keys()):
+        res['T3PHI'][k] /= n[k]
+        res['T3PHIERR'][k] /= n[k]
+        res['T3PHIERR'][k] = pow(res['T3PHIERR'][k],0.5)
+        res['T3PHI'][k][n[k]==0] = np.nan
+        res['T3PHIERR'][k][n[k]==0] = np.nan
+        res['T3PHI'][k] = (res['T3PHI'][k]+180)%360 - 180
         # TODO: unwrap
         res['u1T3'][k] /= n['all']
         res['v1T3'][k] /= n['all']
@@ -265,14 +278,17 @@ def loadGravi(filename, insname='GRAVITY_SC'):
             if insname in h.header['INSNAME']:
                 if res['VISPHI'] is None:
                     res['VISPHI'] = {}
+                    res['VISPHIERR'] = {}
                     res['uVISPHI'] = {}
                     res['vVISPHI'] = {}
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['VISPHI'][k] = h.data['VISPHI'][i].copy()
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i])
-                        res['VISPHI'][k][flag] = 0.0
+                        res['VISPHIERR'][k] = pow(h.data['VISPHIERR'][i].copy(),2)
+                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]) #this will make all flagged data absent, when averag would preserve them. Not good.
+                        res['VISPHI'][k][flag] = np.nan
+                        res['VISPHIERR'][k][flag] = np.nan
                         res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
                         res['vVISPHI'][k] = h.data['VCOORD'][i].copy()
                         n[k] = np.ones(len(res['VISPHI'][k]))
@@ -282,15 +298,19 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i])
-                        res['VISPHI'][k][~flag] += h.data['VISPHI'][i][~flag]
+                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i])
+                        res['VISPHI'][k][~flag] += h.data['VISPHI'][i][~flag] #this will make all flagged data absent, when averag would preserve them. Not good.
+                        res['VISPHIERR'][k][~flag] += pow(h.data['VISPHIERR'][i][~flag],2)
                         res['uVISPHI'][k] += h.data['UCOORD'][i]
                         res['vVISPHI'][k] += h.data['VCOORD'][i]
                         n[k][~flag] += 1.0
                     n['all'] += 1
     for k in list(res['VISPHI'].keys()):
         res['VISPHI'][k] /= n[k]
+        res['VISPHIERR'][k] /= n[k]
+        res['VISPHIERR'][k] = pow(res['VISPHIERR'][k],0.5)
         res['VISPHI'][k][n[k]==0] = np.nan
+        res['VISPHIERR'][k][n[k]==0] = np.nan
         res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
         # TODO: unwrap
         res['uVISPHI'][k] /= float(n['all'])
@@ -438,9 +458,9 @@ def Vmodel(r, modelstr, target=None):
         params = {s.split('=')[0].strip():float(s.split('=')[1]) for s in modelstr.upper().split(',')}
     else:
         params = {}
-    res['V'], res['V2'], res['uV2'], res['vV2'] = {}, {}, {}, {}
-    res['VISPHI'], res['uVISPHI'], res['vVISPHI'] = {},{},{}
-    res['T3'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{}
+    res['V'], res['V2'], res['V2ERR'], res['uV2'], res['vV2'] = {}, {}, {}, {}, {}
+    res['VISPHI'],res['VISPHIERR'], res['uVISPHI'], res['vVISPHI'] = {},{},{},{}
+    res['T3PHI'], res['T3PHIERR'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{},{}
 
     # -- primary flux
     if not 'F' in list(params.keys()):
@@ -546,7 +566,7 @@ def Vmodel(r, modelstr, target=None):
         for k in list(res['V'].keys()):
             res['VISPHI'][k] = 180*np.angle(res['V'][k])/np.pi
 
-    for k in list(r['T3'].keys()):
+    for k in list(r['T3PHI'].keys()):
         T = (k[0:2],k[2:4],k[4:6]) # -- three telescpoes
         f = []
         # -- compute formula for closure phase
@@ -565,16 +585,25 @@ def Vmodel(r, modelstr, target=None):
         else:
             f.append((T[0]+T[2], - _s))
         # -- signed sum
-        res['T3'][k] = 0.
+        res['T3PHI'][k] = 0.
         for x in f:
-            res['T3'][k] += x[1]*res['VISPHI'][x[0]]
-        res['T3'][k] = (res['T3'][k]+180.)%360. - 180.
+            res['T3PHI'][k] += x[1]*res['VISPHI'][x[0]]
+        res['T3PHI'][k] = (res['T3PHI'][k]+180.)%360. - 180.
     return res
 
-def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
+def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None, plotErrorBars=0, filt=False,
               onlySpectrum=False, exportFilename='', v2b=False, model='',
               withdPhi=False):
     #print '#'*5, exportFilename, '#'*5
+    if medFiltW is None:
+        filt=False
+    else:
+        medwidth=medFiltW
+        filt=True
+  
+    doErr=(plotErrorBars==1)
+    print(doErr)
+
     top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
         r = loadGraviMulti(filename, insname)
@@ -621,7 +650,12 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         wlmin = r['wl'].min()
     if wlmax is None or wlmax>r['wl'].max():
         wlmax = r['wl'].max()
-
+    
+    r['bwidth']=r['wl'].copy()
+    for i in range(r['bwidth'].size-1):
+      r['bwidth'][i+1]-=r['wl'][i]
+    r['bwidth'][0]=r['bwidth'][1]
+    r['wl']-=r['bwidth'] # wavelength is for the center of the 'step' plotted channels
     w = np.where((r['wl']<=wlmax)*(r['wl']>=wlmin))
     r['wl band'] = r['wl'][w]
 
@@ -745,13 +779,16 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
 
     ax.xaxis.grid()
 
-    if filt:
-        import d4
+    #if filt:
+    #        import d4
     # -- V2 and visPHI ----
     r['V2 band'] = {}
+    r['V2ERR band'] = {}
     r['dV2 band'] = {}
     r['dPHI band'] = {}
+    r['dPHIerr band'] = {}
     r['CP band'] = {}
+    r['CPERR band'] = {}
     r['dCP band'] = {}
 
     if not model is '':
@@ -785,7 +822,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
             #tmp = slidingOp(r['wl'][w], spr, 0.05)
             #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
             #spr[w_] = tmp['median'][w_]
-            plt.plot(r['wl'][w], d4.filter1D(spr, filtV, order=filtO), '-k', alpha=0.8, linewidth=1)
+            spr=scipy.signal.medfilt(spr,medwidth)
+            #plt.plot(r['wl'][w], d4.filter1D(spr, filtV, order=filtO), '-k', alpha=0.8, linewidth=1)
+            plt.plot(r['wl'][w], spr, '-k', alpha=0.8, linewidth=1)
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.3, linewidth=1,label=B)
             if not model is '':
                 plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
@@ -793,6 +832,10 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         else:
             plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
                      linestyle='steps')
+
+            if doErr:
+                plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, r['V2'][B][w], yerr=r['V2ERR'][B][w],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
 
             r['V2 band'][B] = r['V2'][B][w]
             if computeDiff:
@@ -829,9 +872,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
 
             # -- store result in another variable
             r['dPHI band'][B] = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
+            r['dPHIerr band'][B] = r['VISPHIERR'][B][w]
             if not model is '':
                 rm['dPHI band'][B] = rm['VISPHI'][B][w] - np.polyval(ccm, rm['wl'][w])
-
             if r['SPEC RES']=='HIGH' and filt:
                 print('--smoothing--')
                 spr = r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w])
@@ -840,14 +883,21 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
                 #tmp = slidingOp(r['wl'][w], spr, 0.05)
                 #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
                 #spr[w_] = tmp['median'][w_]
-                spr = d4.filter1D(spr, filtV, order=filtO)
+
+                #spr = d4.filter1D(spr, filtV, order=filtO)
+
+                spr = scipy.signal.medfilt(spr,medwidth)
                 plt.plot(r['wl'][w], spr, '-k', linewidth=1, alpha=0.8)
-                plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]),
-                         '-k', alpha=0.3, linewidth=1, label=B)
-                plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
-            else:
-                plt.plot(r['wl'][w], r['dPHI band'][B],
-                         '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+                #plt.plot(r['wl'][w], r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]),
+                #         '-k', alpha=0.3, linewidth=1, label=B)
+                #plt.ylim(getYlim(r['VISPHI'][B][w] - np.polyval(cc, r['wl'][w]) ))
+            
+            plt.plot(r['wl'][w], r['dPHI band'][B],
+                     '-k', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+            if doErr:
+              plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, r['dPHI band'][B], yerr=r['dPHIerr band'][B],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
+
             if not model is '':
                 plt.plot(rm['wl'][w], rm['dPHI band'][B],
                     '-r', alpha=0.5, linewidth=1, linestyle='steps')
@@ -862,29 +912,29 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     axv.set_xlabel('wavelength (um)')
     if withdPhi:
         axp.set_xlabel('wavelength (um)')
-    # -- T3 ----
-    for i,B in enumerate(r['T3'].keys()):
+    # -- T3PHI ----
+    for i,B in enumerate(r['T3PHI'].keys()):
         if withdPhi:
             axx = plt.subplot(5,3,4+3*i, sharex=ax)
         else:
             axx = plt.subplot(5,2,3+2*i, sharex=ax)
 
         if True:
-            tmp = r['T3'][B]
+            tmp = r['T3PHI'][B]
         else:
-            tmp = (r['T3'][B]+90)%180-90
-            wr = r['T3'][B][w]<=-90.0
+            tmp = (r['T3PHI'][B]+90)%180-90
+            wr = r['T3PHI'][B][w]<=-90.0
             if wr[0].sum():
                 plt.plot(r['wl'][w][wr], tmp[w][wr], '.r', alpha=0.5,
                          label='<-90')
-                wb = r['T3'][B][w]>=90.0
+                wb = r['T3PHI'][B][w]>=90.0
             if wb[0].sum():
                 plt.plot(r['wl'][w][wb], tmp[w][wb], '.b', alpha=0.5,
                          label='>90')
 
         if r['SPEC RES']=='HIGH' and filt:
             print('--smoothing--')
-            s, c = np.sin(np.pi*r['T3'][B]/180.), np.cos(np.pi*r['T3'][B]/180.)
+            s, c = np.sin(np.pi*r['T3PHI'][B]/180.), np.cos(np.pi*r['T3PHI'][B]/180.)
             s = removenans(rm['wl'], s)
             c = removenans(rm['wl'], c)
             # -- sigma clipping
@@ -893,8 +943,13 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
             #s[w_] = ts['median'][w_]
             #w_ = np.where(np.abs(s-tc['median'])>3*tc['1sigma'])
             #c[w_] = tc['median'][w_]
-            s = d4.filter1D(s, filtV, order=filtO)[w]
-            c = d4.filter1D(c, filtV, order=filtO)[w]
+            
+            #s = d4.filter1D(s, filtV, order=filtO)[w]
+            #c = d4.filter1D(c, filtV, order=filtO)[w]
+
+            s = scipy.signal.medfilt(s,medwidth)[w]
+            c = scipy.signal.medfilt(c,medwidth)[w]
+            
             a = np.arctan2(s,c)*180/np.pi
             a = (a+90)%180-90
             plt.plot(r['wl'][w], a, '-k', alpha=0.8, linewidth=1)
@@ -902,8 +957,11 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
         else:
             plt.plot(r['wl'][w], tmp[w], '-k', alpha=0.5, linewidth=1, label=B,
                      linestyle='steps')
+            if doErr:
+                plt.errorbar(r['wl'][w]+r['bwidth'][w]/2.0, tmp[w], yerr=r['T3PHIERR'][B][w],
+                           fmt='none', alpha=0.5, linewidth=1, label=B, linestyle='steps')
         if not model is '':
-            plt.plot(rm['wl'][w], rm['T3'][B][w], '-r', alpha=0.5, linewidth=1,
+            plt.plot(rm['wl'][w], rm['T3PHI'][B][w], '-r', alpha=0.5, linewidth=1,
                 linestyle='steps')
 
         r['CP band'][B] = tmp[w]
@@ -911,8 +969,8 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
             cc = nanpolyfit(r['wl'][wc], tmp[wc], 1)
             r['dCP band'][B] = tmp[w] - np.polyval(cc, r['wl'][w])
             if not model is '':
-                ccm = nanpolyfit(rm['wl'][wc], rm['T3'][B][wc], 1)
-                rm['dCP band'][B] = rm['T3'][B][w] - np.polyval(ccm, r['wl'][w])
+                ccm = nanpolyfit(rm['wl'][wc], rm['T3PHI'][B][wc], 1)
+                rm['dCP band'][B] = rm['T3PHI'][B][w] - np.polyval(ccm, r['wl'][w])
 
         plt.ylim(getYlim(tmp[w]))
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
@@ -1109,9 +1167,14 @@ class guiPlot(tkinter.Frame):
 
         bo = {'fill':'both', 'side':'left', 'padx':1, 'pady':1}
         self.wlrange = tkinter.StringVar()
-        self.wlrange.set('None None') # default sepactral range
+        self.wlrange.set('None None') # default spectral range
         self.plot_opt={}
         self.setPlotRange()
+        self.filterw = tkinter.StringVar()
+        self.filterw.set('None') # default median filter width
+        self.setPlotMedianFilterWidth()
+        self.addErrorBars = tkinter.IntVar()
+        self.setPlotErrorBars()
 
         # -- create a button for each spectral range:
         for text, mode in modes:
@@ -1144,7 +1207,21 @@ class guiPlot(tkinter.Frame):
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
+        b = tkinter.Entry(self.waveFrame, textvariable=self.filterw,
+                          width=4, font=self.font)
+        b.pack(**bo)
 
+        b = tkinter.Label(self.waveFrame, text='Med.Wdth',
+                          bg=_gray30, fg=_gray80, font=self.font)
+        b.pack(**bo)
+
+        b = tkinter.Checkbutton(self.waveFrame, variable=self.addErrorBars)
+
+        b.pack(**bo)
+        
+        b = tkinter.Label(self.waveFrame, text='ErrBar',
+                          bg=_gray30, fg=_gray80, font=self.font)
+        b.pack(**bo)
 
         # -- input for visibility model
         self.modelStr = tkinter.StringVar()
@@ -1391,10 +1468,41 @@ class guiPlot(tkinter.Frame):
             tkinter.messagebox.showerror('ERROR', 'range format is "wlmin wlmax" in um')
             return False
         return True
+    
+    def setPlotMedianFilterWidth(self):
+        try:
+            if self.filterw.get() =='None':
+                self.plot_opt['medFiltW'] = None
+            else:
+                self.plot_opt['medFiltW'] = int(self.filterw.get())
+                if not int(self.filterw.get())%2==1 :
+                    tkinter.messagebox.showerror('ERROR', 'Median Filter Width format must be an ODD integer value')
+                    return False
+                if int(self.filterw.get()) < 3 :
+                    self.plot_opt['medFiltW'] = None
 
+        except:
+            tkinter.messagebox.showerror('ERROR', 'Median Filter Width format is an odd integer value or "None" ')
+            return False
+            
+        return True
+      
+    def setPlotErrorBars(self):
+        try:
+            self.plot_opt['plotErrorBars'] = int(self.addErrorBars.get())
+        except:
+            tkinter.messagebox.showerror('ERROR', '...unknown in plotErrorBars (CheckButton)')
+            return False
+            
+        return True
+      
     def quickViewV2(self):
         self.setFileList()
         if not self.setPlotRange():
+            return
+        if not self.setPlotMedianFilterWidth():
+            return
+        if not self.setPlotErrorBars():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
@@ -1412,6 +1520,10 @@ class guiPlot(tkinter.Frame):
     def quickViewAll(self):
         self.setFileList()
         if not self.setPlotRange():
+            return
+        if not self.setPlotMedianFilterWidth():
+            return
+        if not self.setPlotErrorBars():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
@@ -1431,6 +1543,10 @@ class guiPlot(tkinter.Frame):
         self.setFileList()
         if not self.setPlotRange():
             return
+        if not self.setPlotMedianFilterWidth():
+            return
+        if not self.setPlotErrorBars():
+            return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
             return
@@ -1448,6 +1564,10 @@ class guiPlot(tkinter.Frame):
     def quickViewSpctr(self):
         self.setFileList()
         if not self.setPlotRange():
+            return
+        if not self.setPlotMedianFilterWidth():
+            return
+        if not self.setPlotErrorBars():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
