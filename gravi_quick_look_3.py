@@ -60,8 +60,8 @@ graviqlmod = '.graviqlmod'
 def openUrl(url):
     webbrowser.open_new(url)
 
-def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
-    data = [loadGravi(f, insname=insname) for f in filenames]
+def loadGraviMulti(filenames, doFlags, insname='GRAVITY_SC', wlmin=None, wlmax=None):
+    data = [loadGravi(f, doFlags, insname) for f in filenames]
     # check if all observations done for sma object in spectro same mode
     modeObj = set(['-'.join([d['TARG NAME'],d['SPEC RES'],
                             d['POLA'],d['BASELINE']]) for d in data])
@@ -122,7 +122,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
                                         0.5*(wlmin+wlmax)))/float(len(data))
     return data[0]
 
-def loadGravi(filename, insname='GRAVITY_SC'):
+def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
     f = fits.open(filename)
     res = {}
     insnames = []
@@ -185,7 +185,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VIS2DATA'][i]) + np.isnan(h.data['VIS2ERR'][i])
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag+= (np.isnan(h.data['VIS2DATA'][i]) + np.isnan(h.data['VIS2ERR'][i]))
                         res['V2'][k] = h.data['VIS2DATA'][i].copy()
                         res['V2ERR'][k] = pow(h.data['VIS2ERR'][i].copy(),2)
                         res['V2'][k][flag] = np.nan
@@ -199,7 +200,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VIS2DATA'][i])
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag+= (np.isnan(h.data['VIS2DATA'][i])+ np.isnan(h.data['VIS2ERR'][i]))
                         res['V2'][k][~flag] += h.data['VIS2DATA'][i][~flag]
                         res['V2ERR'][k][~flag] += pow(h.data['VIS2ERR'][i][~flag],2)
                         res['uV2'][k] += h.data['UCOORD'][i].copy()
@@ -232,7 +234,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                             oiarray[h.data['STA_INDEX'][i][2]]
                         res['T3PHI'][k] = h.data['T3PHI'][i].copy()
                         res['T3PHIERR'][k] = pow(h.data['T3PHIERR'][i].copy(),2)
-                        flag = h.data['FLAG'][i] + np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k])
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag += (np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k]))
                         res['T3PHI'][k][flag] = np.nan # no data
                         res['T3PHIERR'][k][flag] = np.nan # no data
                         res['u1T3'][k] = h.data['U1COORD'][i].copy()
@@ -247,7 +250,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]+\
                             oiarray[h.data['STA_INDEX'][i][2]]
-                        flag = h.data['FLAG'][i] + np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k])
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag +=  (np.isnan(res['T3PHI'][k]) + np.isnan(res['T3PHIERR'][k]))
                         res['T3PHI'][k][~flag] += h.data['T3PHI'][i][~flag]
                         res['T3PHIERR'][k][~flag] += pow(h.data['T3PHI'][i][~flag],2)
                         res['u1T3'][k] += h.data['U1COORD'][i].copy()
@@ -286,7 +290,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['VISPHI'][k] = h.data['VISPHI'][i].copy()
                         res['VISPHIERR'][k] = pow(h.data['VISPHIERR'][i].copy(),2)
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]) #this will make all flagged data absent, when averag would preserve them. Not good.
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag += (np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]))
                         res['VISPHI'][k][flag] = np.nan
                         res['VISPHIERR'][k][flag] = np.nan
                         res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
@@ -298,7 +303,8 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
-                        flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i])
+                        flag=h.data['FLAG'][i] if doFlags else 0
+                        flag += (np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]))
                         res['VISPHI'][k][~flag] += h.data['VISPHI'][i][~flag] #this will make all flagged data absent, when averag would preserve them. Not good.
                         res['VISPHIERR'][k][~flag] += pow(h.data['VISPHIERR'][i][~flag],2)
                         res['uVISPHI'][k] += h.data['UCOORD'][i]
@@ -591,7 +597,7 @@ def Vmodel(r, modelstr, target=None):
         res['T3PHI'][k] = (res['T3PHI'][k]+180.)%360. - 180.
     return res
 
-def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None, plotErrorBars=0, filt=False,
+def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None, plotErrorBars=0, discardFlags=0, filt=False,
               onlySpectrum=False, exportFilename='', v2b=False, model='',
               withdPhi=False):
     #print '#'*5, exportFilename, '#'*5
@@ -602,11 +608,11 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
         filt=True
   
     doErr=(plotErrorBars==1)
-    print(doErr)
+    doFlags=(discardFlags==0)
 
     top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
-        r = loadGraviMulti(filename, insname)
+        r = loadGraviMulti(filename, doFlags, insname)
         if r is None:
             return False
         top = 0.06*(min(len(filename)//2, 2))
@@ -620,7 +626,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
             tmp += '...'
         filename = tmp
     else:
-        r = loadGravi(filename, insname)
+        r = loadGravi(filename, doFlags, insname)
         top += 0.05
 
     if r is None:
@@ -1170,7 +1176,9 @@ class guiPlot(tkinter.Frame):
         self.setPlotMedianFilterWidth()
         self.addErrorBars = tkinter.IntVar()
         self.setPlotErrorBars()
-
+        self.doDiscardFlags = tkinter.IntVar()
+        self.discardFlags()
+        
         # -- create a button for each spectral range:
         for text, mode in modes:
             b = tkinter.Radiobutton(self.waveFrame, text=text,
@@ -1218,6 +1226,14 @@ class guiPlot(tkinter.Frame):
                           bg=_gray30, fg=_gray80, font=self.font)
         b.pack(**bo)
 
+        b = tkinter.Checkbutton(self.waveFrame, variable=self.doDiscardFlags)
+
+        b.pack(**bo)
+        
+        b = tkinter.Label(self.waveFrame, text='unFlag',
+                          bg=_gray30, fg=_gray80, font=self.font)
+        b.pack(**bo)
+        
         # -- input for visibility model
         self.modelStr = tkinter.StringVar()
         self.modelStr.set('') # default value
@@ -1491,6 +1507,15 @@ class guiPlot(tkinter.Frame):
             
         return True
       
+    def discardFlags(self):
+        try:
+            self.plot_opt['discardFlags'] = int(self.doDiscardFlags.get())
+        except:
+            tkinter.messagebox.showerror('ERROR', '...unknown in discardFlags (CheckButton)')
+            return False
+            
+        return True
+      
     def quickViewV2(self):
         self.setFileList()
         if not self.setPlotRange():
@@ -1498,6 +1523,8 @@ class guiPlot(tkinter.Frame):
         if not self.setPlotMedianFilterWidth():
             return
         if not self.setPlotErrorBars():
+            return
+        if not self.discardFlags():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
@@ -1519,6 +1546,8 @@ class guiPlot(tkinter.Frame):
         if not self.setPlotMedianFilterWidth():
             return
         if not self.setPlotErrorBars():
+            return
+        if not self.discardFlags():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
@@ -1542,6 +1571,8 @@ class guiPlot(tkinter.Frame):
             return
         if not self.setPlotErrorBars():
             return
+        if not self.discardFlags():
+            return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
             return
@@ -1563,6 +1594,8 @@ class guiPlot(tkinter.Frame):
         if not self.setPlotMedianFilterWidth():
             return
         if not self.setPlotErrorBars():
+            return
+        if not self.discardFlags():
             return
         if self.filename is None:
             tkinter.messagebox.showerror('ERROR', 'no file selected')
