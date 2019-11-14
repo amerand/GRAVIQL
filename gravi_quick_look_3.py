@@ -275,6 +275,7 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
 
     # -- diff Phase ---
     res['VISPHI'] = None
+    res['VISAMP'] = None
     n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in list(h.header.keys()) and \
@@ -282,7 +283,9 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
             if insname in h.header['INSNAME']:
                 if res['VISPHI'] is None:
                     res['VISPHI'] = {}
+                    res['VISAMP'] = {}
                     res['VISPHIERR'] = {}
+                    res['VISAMPERR'] = {}
                     res['uVISPHI'] = {}
                     res['vVISPHI'] = {}
                     for i in range(6):
@@ -294,6 +297,12 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
                         flag += (np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]))
                         res['VISPHI'][k][flag] = np.nan
                         res['VISPHIERR'][k][flag] = np.nan
+                        
+                        res['VISAMP'][k] = h.data['VISAMP'][i].copy()
+                        res['VISAMPERR'][k] = pow(h.data['VISAMPERR'][i].copy(),2)
+                        res['VISAMP'][k][flag] = np.nan
+                        res['VISAMPERR'][k][flag] = np.nan
+                        
                         res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
                         res['vVISPHI'][k] = h.data['VCOORD'][i].copy()
                         n[k] = np.ones(len(res['VISPHI'][k]))
@@ -306,18 +315,26 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
                         flag=h.data['FLAG'][i] if doFlags else 0
                         flag += (np.isnan(h.data['VISPHI'][i]) + np.isnan(h.data['VISPHIERR'][i]))
                         res['VISPHI'][k][~flag] += h.data['VISPHI'][i][~flag] #this will make all flagged data absent, when averag would preserve them. Not good.
+                        res['VISAMP'][k][~flag] += h.data['VISAMP'][i][~flag] #this will make all flagged data absent, when averag would preserve them. Not good.
                         res['VISPHIERR'][k][~flag] += pow(h.data['VISPHIERR'][i][~flag],2)
+                        res['VISAMPERR'][k][~flag] += pow(h.data['VISAMPERR'][i][~flag],2)
                         res['uVISPHI'][k] += h.data['UCOORD'][i]
                         res['vVISPHI'][k] += h.data['VCOORD'][i]
                         n[k][~flag] += 1.0
                     n['all'] += 1
     for k in list(res['VISPHI'].keys()):
         res['VISPHI'][k] /= n[k]
+        res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
         res['VISPHIERR'][k] /= n[k]
         res['VISPHIERR'][k] = pow(res['VISPHIERR'][k],0.5)
         res['VISPHI'][k][n[k]==0] = np.nan
         res['VISPHIERR'][k][n[k]==0] = np.nan
-        res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
+
+        res['VISAMP'][k] /= n[k]
+        res['VISAMPERR'][k] /= n[k]
+        res['VISAMPERR'][k] = pow(res['VISAMPERR'][k],0.5)
+        res['VISAMP'][k][n[k]==0] = np.nan
+        res['VISAMPERR'][k][n[k]==0] = np.nan
         # TODO: unwrap
         res['uVISPHI'][k] /= float(n['all'])
         res['vVISPHI'][k] /= float(n['all'])
@@ -465,7 +482,7 @@ def Vmodel(r, modelstr, target=None):
     else:
         params = {}
     res['V'], res['V2'], res['V2ERR'], res['uV2'], res['vV2'] = {}, {}, {}, {}, {}
-    res['VISPHI'],res['VISPHIERR'], res['uVISPHI'], res['vVISPHI'] = {},{},{},{}
+    res['VISPHI'],res['VISPHIERR'], res['VISAMP'],res['VISAMPERR'],res['uVISPHI'], res['vVISPHI'] = {},{},{},{},{},{}
     res['T3PHI'], res['T3PHIERR'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{},{}
 
     # -- primary flux
@@ -782,7 +799,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
 
     #if filt:
     #        import d4
-    # -- V2 and visPHI ----
+    # -- V2 and visPHI or VISAMP and VISPHI ---- 
     r['V2 band'] = {}
     r['V2ERR band'] = {}
     r['dV2 band'] = {}
@@ -799,25 +816,26 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
         rm['CP band'] = {}
         rm['dCP band'] = {}
 
-    for i,B in enumerate(r['V2'].keys()):
+    what='VISAMP' if withdPhi else 'V2'  
+    for i,B in enumerate(r[what].keys()):
         if withdPhi:
             axv = plt.subplot(6,3,3+3*i, sharex=ax)
         else:
             axv = plt.subplot(6,2,2+2*i, sharex=ax)
 
         if i==0:
-            plt.title('V2')
+            plt.title(what)
 
         # -- filter negative measurements:
-        for j in np.where(r['V2'][B]<=0)[0]:
-            r['V2'][B][j] = np.median(r['V2'][B][max(j-7, 0):
-                                                min(j+7, len(r['V2'][B])-1)])
+        for j in np.where(r[what][B]<=0)[0]:
+            r[what][B][j] = np.median(r[what][B][max(j-7, 0):
+                                                min(j+7, len(r[what][B])-1)])
 
         filtV = np.linspace(1,0,8)**0.5
         filtO = 16
         if r['SPEC RES']=='HIGH' and filt:
             print('--smoothing--')
-            spr = r['V2'][B][w]
+            spr = r[what][B][w]
             spr = removenans(rm['wl'][w], spr)
             # -- sigma clipping
             #tmp = slidingOp(r['wl'][w], spr, 0.05)
@@ -826,31 +844,31 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, medFiltW=None
             spr=scipy.signal.medfilt(spr,medwidth)
             #plt.plot(r['wl'][w], d4.filter1D(spr, filtV, order=filtO), '-k', alpha=0.8, linewidth=1)
             plt.plot(r['wl'][w], spr, '-k', alpha=0.8, linewidth=1)
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.3, linewidth=1,label=B)
+            plt.plot(r['wl'][w], r[what][B][w], '-k', alpha=0.3, linewidth=1,label=B)
             if not model is '':
-                plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+                plt.plot(rm['wl'][w], rm[what][B][w], '-r', alpha=0.5, linewidth=1,
                          drawstyle='steps-mid')
         else:
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
+            plt.plot(r['wl'][w], r[what][B][w], '-k', alpha=0.5, linewidth=1,label=B,
                      drawstyle='steps-mid')
 
             if doErr:
-                plt.errorbar(r['wl'][w], r['V2'][B][w], yerr=r['V2ERR'][B][w],
+                plt.errorbar(r['wl'][w], r[what][B][w], yerr=r['V2ERR'][B][w],
                            fmt='none', alpha=0.5, linewidth=1, label=B, drawstyle='steps-mid')
 
-            r['V2 band'][B] = r['V2'][B][w]
+            r['V2 band'][B] = r[what][B][w]
             if computeDiff:
-                cc = nanpolyfit(r['wl'][wc],r['V2'][B][wc],1)
-                r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
+                cc = nanpolyfit(r['wl'][wc],r[what][B][wc],1)
+                r['dV2 band'][B] = r[what][B][w]/np.polyval(cc, r['wl'][w])
         if not model is '':
-            plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+            plt.plot(rm['wl'][w], rm[what][B][w], '-r', alpha=0.5, linewidth=1,
                      drawstyle='steps-mid')
 
 
         for k in list(lines.keys()):
             plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
                        linestyle='dashed')
-        tmp = getYlim(r['V2'][B][w])
+        tmp = getYlim(r[what][B][w])
         plt.ylim(max(tmp[0], 0), tmp[1])
         plt.legend(loc='upper left', fontsize=7, ncol=1)
         axv.xaxis.grid()
@@ -1112,7 +1130,7 @@ class guiPlot(tkinter.Frame):
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
 
-        b = tkinter.Button(self.actFrame, text='Sp, CP, dPhi, V2', font=self.font,
+        b = tkinter.Button(self.actFrame, text='Sp, CP, VisPhi, VisAmp', font=self.font,
                            command = self.quickViewAll)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
