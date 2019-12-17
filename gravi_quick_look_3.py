@@ -343,9 +343,14 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
     res['FLUX'] = {}
     n = 0.0
     for h in f:
-        if 'EXTNAME' in list(h.header.keys()) and \
-            h.header['EXTNAME'] == 'OI_FLUX':
+        if 'EXTNAME' in list(h.header.keys()) and h.header['EXTNAME'] == 'OI_FLUX':
             if insname in h.header['INSNAME']:
+                WHAT='FLUXDATA'
+                try:
+                  test=h.data[WHAT][0]
+                except KeyError:
+                  WHAT='FLUX'
+
                 if len(res['FLUX'])==0:
                     for i in range(4):
                         k = oiarray[h.data['STA_INDEX'][i]]
@@ -355,7 +360,7 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
                                              p2vmCont.cc[res['SPEC RES'], res['POLA']]['T%d'%(i+1)])
                         else:
                             cont = 1.
-                        res['FLUX'][k] = h.data['FLUX'][i].copy()/cont
+                        res['FLUX'][k] = h.data[WHAT][i].copy()/cont
                     n += 1
                     #print res['FLUX'].keys()
                 else:
@@ -367,7 +372,7 @@ def loadGravi(filename, doFlags, insname='GRAVITY_SC'):
                                               p2vmCont.cc[res['SPEC RES'], res['POLA']]['T%d'%(i+1)])
                          else:
                             cont = 1.
-                         res['FLUX'][k] += h.data['FLUX'][i]/cont
+                         res['FLUX'][k] += h.data[WHAT][i]/cont
                          n += 1
     for k in list(res['FLUX'].keys()):
         res['FLUX'][k] /= n
@@ -1111,7 +1116,7 @@ class guiPlot(tkinter.Frame):
         w = np.where([i.startswith('GRAVITY') and # -- GRAVITY template
                       '_obs_' in i and # -- an observation (not a calibration)
                       not '_SKY' in i and # -- not a sky
-                      'VIS' in i # -- visibilities (not dark, etc.)
+                      ( 'POSTPROCESSED' in i or 'VIS' in i ) # -- visibilities (not dark, etc.) but can be 'postprocessed' (new)
                       for i in tplid])
         # -- debug:
         #print '-->', tplid
