@@ -2,6 +2,8 @@
 
 A Python 3 Tkinter GUI aimed at visualizing VLTI/GRAVITY reduced and calibrated data by the [GRAVITY pipeline](https://www.eso.org/sci/software/pipelines/gravity/gravity-pipe-recipes.html) version 0.9.7 and above.
 
+MacOS Users: This script will crash OS X graphical interface if you use Anaconda. Please use a framework python version (e.g. https://www.python.org/downloads/mac-osx/).
+
 Note that the python 2.7 version is here for legacy ([`gravi_quick_look.py`](gravi_quick_look.py)) by not updated anymore!
 
 ## Overview

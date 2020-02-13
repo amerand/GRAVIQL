@@ -1,5 +1,4 @@
-
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -70,7 +69,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
         return None
 
     # -- averages, stored in first file
-    for o in ['V2', 'T3', 'VISPHI']:
+    for o in ['VIS', 'V2', 'T3', 'VISPHI']:
         for k in list(data[0][o].keys()): # -- for each baseline
             for i in range(len(data)): # -- for each data file
                 if i==0:
@@ -86,7 +85,7 @@ def loadGraviMulti(filenames, insname='GRAVITY_SC', wlmin=None, wlmax=None):
 
     for o in ['uV2', 'vV2',
               'u1T3', 'v1T3', 'u2T3', 'v2T3',
-              'uVISPHI', 'vVISPHI']:
+              'uVIS', 'vVIS']:
         for k in list(data[0][o].keys()):
             # -- for each baseline
             for i in range(len(data)):
@@ -172,6 +171,7 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                     np.char.strip(f['OI_ARRAY'].data['STA_NAME']))))
     # -- V2: ----
     res['V2'] = None
+
     n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in list(h.header.keys()) and \
@@ -258,23 +258,28 @@ def loadGravi(filename, insname='GRAVITY_SC'):
 
     # -- diff Phase ---
     res['VISPHI'] = None
+    res['VIS'] = None
+
     n = {'all':0.0}
     for h in f:
         if 'EXTNAME' in list(h.header.keys()) and \
             h.header['EXTNAME'] == 'OI_VIS':
             if insname in h.header['INSNAME']:
                 if res['VISPHI'] is None:
+                    res['VIS'] = {}
                     res['VISPHI'] = {}
-                    res['uVISPHI'] = {}
-                    res['vVISPHI'] = {}
+                    res['uVIS'] = {}
+                    res['vVIS'] = {}
                     for i in range(6):
                         k = oiarray[h.data['STA_INDEX'][i][0]]+\
                             oiarray[h.data['STA_INDEX'][i][1]]
                         res['VISPHI'][k] = h.data['VISPHI'][i].copy()
+                        res['VIS'][k] = h.data['VISAMP'][i].copy()
                         flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i])
                         res['VISPHI'][k][flag] = 0.0
-                        res['uVISPHI'][k] = h.data['UCOORD'][i].copy()
-                        res['vVISPHI'][k] = h.data['VCOORD'][i].copy()
+                        res['VIS'][k][flag] = 0.0
+                        res['uVIS'][k] = h.data['UCOORD'][i].copy()
+                        res['vVIS'][k] = h.data['VCOORD'][i].copy()
                         n[k] = np.ones(len(res['VISPHI'][k]))
                         n[k][flag] = 0.0
                     n['all'] += 1
@@ -284,17 +289,20 @@ def loadGravi(filename, insname='GRAVITY_SC'):
                             oiarray[h.data['STA_INDEX'][i][1]]
                         flag = h.data['FLAG'][i] + np.isnan(h.data['VISPHI'][i])
                         res['VISPHI'][k][~flag] += h.data['VISPHI'][i][~flag]
-                        res['uVISPHI'][k] += h.data['UCOORD'][i]
-                        res['vVISPHI'][k] += h.data['VCOORD'][i]
+                        res['VIS'][k][~flag] += h.data['VISAMP'][i][~flag]
+                        res['uVIS'][k] += h.data['UCOORD'][i]
+                        res['vVIS'][k] += h.data['VCOORD'][i]
                         n[k][~flag] += 1.0
                     n['all'] += 1
     for k in list(res['VISPHI'].keys()):
+        res['VIS'][k] /= n[k]
         res['VISPHI'][k] /= n[k]
         res['VISPHI'][k][n[k]==0] = np.nan
+        res['VIS'][k][n[k]==0] = np.nan
         res['VISPHI'][k] = (res['VISPHI'][k]+180)%360 - 180
         # TODO: unwrap
-        res['uVISPHI'][k] /= float(n['all'])
-        res['vVISPHI'][k] /= float(n['all'])
+        res['uVIS'][k] /= float(n['all'])
+        res['vVIS'][k] /= float(n['all'])
 
     # -- Spctr: ----
     res['FLUX'] = {}
@@ -351,16 +359,17 @@ def slidingOp(x,y,dx):
     return res
 
 __lbda, __tran = None, None
-def tellTrans(wl, width=2.3):
+
+def tellTrans(wl, width=2.0):
     global __lbda, __tran
     if __lbda is None:
         wv = '020' # 2mm Water Vapor
-        if os.path.exists('telluric_'+wv+'.dpy'):
-            f = open('telluric_'+wv+'.dpy')
+        if os.path.exists('telluric_'+wv+'.pickle'):
+            f = open('telluric_'+wv+'.pickle', 'rb')
             __lbda, __tran = pickle.load(f)
             f.close()
         else:
-            f = fits.open('transnir'+wv+'.fits')
+            f = fits.open('/Users/amerand/DATA/sky_transmission/'+'transnir'+wv+'.fits')
             __lbda = f[1].data['WAVELENGTH'][0].copy()
             __tran = f[1].data['TRANSMISSION'][0].copy()
             f.close()
@@ -368,14 +377,14 @@ def tellTrans(wl, width=2.3):
             __tran = __tran[::150]
             __tran = __tran[(__lbda<2.5)*(__lbda>1.9)]
             __lbda = __lbda[(__lbda<2.5)*(__lbda>1.9)]
-            f = fits.open('emisnir'+wv+'.fits')
+            f = fits.open('/Users/amerand/DATA/sky_transmission/'+'emisnir'+wv+'.fits')
             __l = f[1].data['WAVELENGTH'][0].copy()
             __e = f[1].data['EMISSION'][0].copy()
             f.close()
             __l = __l[::150]
             __e = __e[::150]
             __tran += np.interp(__lbda, __l, __e)
-            f = open('telluric_'+wv+'.dpy', 'wb')
+            f = open('telluric_'+wv+'.pickle', 'wb')
             pickle.dump((__lbda, __tran), f)
             f.close()
 
@@ -438,8 +447,8 @@ def Vmodel(r, modelstr, target=None):
         params = {s.split('=')[0].strip():float(s.split('=')[1]) for s in modelstr.upper().split(',')}
     else:
         params = {}
-    res['V'], res['V2'], res['uV2'], res['vV2'] = {}, {}, {}, {}
-    res['VISPHI'], res['uVISPHI'], res['vVISPHI'] = {},{},{}
+    res['V'],  res['V2'], res['uV2'], res['vV2'] = {}, {}, {}, {}
+    res['VIS'], res['VISPHI'], res['uVIS'], res['vVIS'] = {},{},{},{}
     res['T3'], res['u1T3'], res['v1T3'], res['u2T3'], res['v2T3'] = {},{},{},{},{}
 
     # -- primary flux
@@ -529,10 +538,13 @@ def Vmodel(r, modelstr, target=None):
             V += fg*Vg*np.exp(1j*phig)
 
             V /= (f + fres + fc + fg)
-            res['V'][k] = V # -- keep it for later
+            res['V'][k] = V # -- complex vis: keep it for later
             res['V2'][k] = np.abs(V)**2
+            res['VIS'][k] = np.abs(V)
             res['uV2'][k] = r['uV2'][k]
             res['vV2'][k] = r['vV2'][k]
+            res['uVIS'][k] = r['uV2'][k]
+            res['vVIS'][k] = r['vV2'][k]
 
     # -- normalized Spectrum:
     if isinstance(f + fres + fc + fg, np.ndarray):
@@ -573,7 +585,7 @@ def Vmodel(r, modelstr, target=None):
 
 def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
               onlySpectrum=False, exportFilename='', v2b=False, model='',
-              withdPhi=False):
+              withdPhi=False, visamp=False):
     #print '#'*5, exportFilename, '#'*5
     top = 0.1
     if isinstance(filename, list) or isinstance(filename, tuple):
@@ -629,13 +641,18 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     rm = Vmodel(r,model, r['TARG NAME'])
     model = rm['modelstr']
 
+    if visamp:
+        vis = 'VIS'
+    else:
+        vis = 'V2'
+
     if v2b:
-        for i,k in enumerate(r['V2'].keys()):
-            B = np.sqrt(r['uV2'][k]**2 + r['vV2'][k]**2)
-            plt.plot(B/r['wl'][w], r['V2'][k][w],
+        for i,k in enumerate(r[vis].keys()):
+            B = np.sqrt(r['u'+vis][k]**2 + r['v'+vis][k]**2)
+            plt.plot(B/r['wl'][w], r[vis][k][w],
                      label=k+' (%5.1fm)'%B, alpha=0.5,
                      marker='.', linestyle='-')
-            plt.plot(B/rm['wl'][w], rm['V2'][k][w],
+            plt.plot(B/rm['wl'][w], rm[vis][k][w],
                      color='k', alpha=0.5,
                      marker='.', linestyle='-')
         plt.grid()
@@ -654,16 +671,16 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     if onlySpectrum:
         ax = plt.subplot(111)
         plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                            wspace=0.1, bottom=0.15, top=0.93-top)
+                            wspace=0.1, bottom=0.15, top=0.85-top)
     else:
         if withdPhi:
             ax = plt.subplot(5,3,1)
             plt.subplots_adjust(hspace=0.0, left=0.05, right=0.98,
-                                wspace=0.1, bottom=0.1, top=0.95-top)
+                                wspace=0.1, bottom=0.1, top=0.88-top)
         else:
             ax = plt.subplot(5,2,1)
             plt.subplots_adjust(hspace=0.0, left=0.08, right=0.98,
-                                wspace=0.2, bottom=0.1, top=0.95-top)
+                                wspace=0.2, bottom=0.1, top=0.88-top)
 
         plt.title('Spectrum and phase closure (deg)')
 
@@ -708,25 +725,75 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     plt.ylim(getYlim(tmp[w]))
 
     # -- spectral line database
-    # -- see also https://arxiv.org/pdf/astro-ph/0008213.pdf, table 1
-    lines = {#'HeI-II':[(2.058, 2.112, 2.1623, 2.166, 2.189), 'c'],
-             #'H2':((2.1218, 2.2235), 'm'),
-             #'MgII':((2.13831, 2.14359), '0.5'),
-             #r'Br$\gamma$':[2.1661, 'b'],
-             #'NIII':[(2.247, 2.251), (0,1,0.5)],
-             #'FeI-II':((2.0635, 2.0846, 2.2263, 2.2389, 2.2479, 2.2626), 'g'),
-             #r'$^{12}$C$^{16}$O HB':([2.2935, 2.3227, 2.3535, 2.3829,2.4142], 'r'),
-             #r'$^{13}$C$^{16}$O HB':([2.3448, 2.3739, 2.4037, 2.4341,2.4971], 'orange'),
-             #'AlI':((2.109884,2.116958,2.270729),'b'),
+    # -- https://arxiv.org/pdf/astro-ph/0008213.pdf, table 1
+    # -- https://iopscience.iop.org/article/10.1086/312501/fulltext/995828.tb2.html
+    lines = {'HeI':[(2.0581, 2.11274, 2.11267, 2.11258, 2.161), 'c', 'dashed'],
+             'HeII':((2.1885), 'c', 'dotted'),
+             'MgII':((2.137, 2.143, ), '0.5', 'dashed'),
+             #'MgI':((2.10655, 2.10666), '0.5', 'dotted'),
+             'HI':[(2.1661, 2.360, 2.367, 2.374, 2.383, 2.392, 2.404, 2.416, 2.431, 2.449), 'b', 'dashed'],
+             'H2':[(2.122), 'b', 'dotted'],
+             'NaI':[(2.208, 2.208969), 'y', 'dashed'],
+             'NIII':[(2.1155, 2.247, 2.251), (0,1,0.5), 'dashed'],
+             'FeII':((2.089, 2.145, 2.241, 2.368), 'g', 'dashed'),
+             r'$^{12}$C$^{16}$O HB':([2.2935, 2.3227, 2.3535, 2.3829, 2.4142], 'r', 'dashed'),
+             r'$^{13}$C$^{16}$O HB':([2.3448, 2.3739, 2.4037, 2.4341, 2.4971], 'r', 'dotted'),
+             #'AlI':((2.109884,2.116958),(0.2,0.5,0.8), 'dotted'),
              #'MgI':((2.121393,2.146472,2.386573),'r'),
-             #'NaI':[(2.206242, 2.208969), 'y'],
              #'ScI':((2.20581,2.20714),'m'),
-             #'SiI':((2.206873),'g')
-             #'CaI':((1.89282, 1.94508,  1.98702, 1.99318, 2.261410,2.263110,2.265741),'g')
+             #'SiII':((2.200),'g'),
+             #'CaI':((1.89282, 1.94508,  1.98702, 1.99318, 2.261410, 2.263110, 2.265741),'g')
              }
-    for k in list(lines.keys()):
-        plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
-                   linestyle='dashed', label=k)
+    if onlySpectrum:
+        for k in list(lines.keys()):
+            plt.vlines(lines[k][0], 0, 5*plt.ylim()[1], color=lines[k][1],
+                    linestyle=lines[k][2], label=k, alpha=0.3, linewidth=1)
+
+    # -- https://iopscience.iop.org/article/10.1088/0067-0049/185/2/289/pdf table 6
+    # -- solar:
+    datal = [(1.97280, 'SiI'), (1.97822, 'CaI'), (1.98204, 'CaI'),
+         (1.98585, 'CaI'), (1.98676, 'CaI'), (1.99226, 'CaI'), (1.99344, 'SiI'),
+         (1.99392, 'CaI'), (1.99673, 'CaI'), (2.03019, 'SiI'), (2.03075, 'SiI'),
+         (2.03494, 'SiI'), (2.03840, 'SiI'), (2.06085, 'SiI'), (2.0635328, 'FeI'),
+         (2.0634902, 'FeI'), (2.07040, 'FeI'), (2.07043, 'SiI'), (2.07226, 'FeI'),
+         (2.08099, 'SiI'), (2.08107, 'FeI'), (2.08465, 'FeI'), (2.09224, 'SiI'),
+         (2.10655, 'MgI'), (2.10666, 'MgI'), (2.10988, 'AlI'), (2.11696, 'AlI'),
+         (2.13601, 'SiI'), (2.17857, 'SiI'), (2.18257, 'SiI'), (2.18853, 'SiI'),
+         (2.20624, 'NaI'), (2.20688, 'SiI'), (2.20897, 'NaI'), (2.22632, 'FeI'),
+         (2.23869, 'FeI'), (2.24794, 'FeI'), (2.25438, 'SiI'), (2.26141, 'CaI'),
+         (2.26260, 'FeI'), (2.26311, 'CaI'), (2.26573, 'CaI'), (2.26720, 'SiI'),
+         (2.28142, 'MgI'), (2.31509, 'FeI'), (2.33548, 'NaI'), (2.33855, 'NaI'),]
+    # -- arcturus:
+    datal = [(1.9727936, 'SiI'), (1.9728928, 'MgI'), (1.9739257, 'MgI'), (1.9782195, 'CaI'),
+        (1.9797279, 'FeI'), (1.9820428, 'CaI'), (1.9852129, 'FeI'), (1.9858512, 'CaI'),
+        (1.9867646, 'CaI'), (1.9922628, 'CaI'), (1.9928778, 'FeI'), (1.9934361, 'SiI'),
+        (1.9939170, 'CaI'), (1.9967282, 'CaI'), (2.0097535, 'FeI'), (2.0286617, 'FeI'),
+        (2.0301933, 'SiI'), (2.0349441, 'SiI'), (2.0355272, 'FeI'), (2.0383973, 'SiI'),
+        (2.0569580, 'FeI'), (2.0608501, 'SiI'), (2.0635321, 'FeI'), (2.0703959, 'FeI'),
+        (2.0704272, 'SiI'), (2.0722606, 'FeI'), (2.0809875, 'SiI'), (2.0810766, 'FeI'),
+        (2.0846491, 'FeI'), (2.0922821, 'SiI'), (2.1065505, 'MgI'), (2.1066642, 'MgI'),
+        (2.1098835, 'AlI'), (2.1169577, 'AlI'), (2.1244261, 'FeI'), (2.1360087, 'SiI'),
+        (2.1785696, 'SiI'), (2.1788888, 'TiI'), (2.1825655, 'SiI'), (2.1885319, 'SiI'),
+        (2.1903353, 'TiI'), (2.2010505, 'TiI'), (2.2057965, 'ScI'), (2.2062447, 'NaI'),
+        (2.2068751, 'SiI'), (2.2089689, 'NaI'), (2.2217295, 'TiI'), (2.2238901, 'TiI'),
+        (2.2263176, 'FeI'), (2.2266250, 'FeI'), (2.2280107, 'TiI'), (2.2316670, 'TiI'),
+        (2.2386901, 'FeI'), (2.2398975, 'FeI'), (2.2450020, 'TiI'), (2.2479405, 'FeI'),
+        (2.2543838, 'SiI'), (2.2614114, 'CaI'), (2.2626002, 'FeI'), (2.2631137, 'CaI'),
+        (2.2632897, 'CaI'), (2.2657359, 'CaI'), (2.2671964, 'SiI'), (2.2814252, 'MgI'),
+        (2.2969596, 'TiI'), (2.3150909, 'FeI'), (2.3354795, 'NaI'), (2.3385518, 'NaI'),
+        (2.3447857, 'TiI'), (2.4572999, 'MgI'), (2.4825687, 'MgI'), (2.4867327, 'MgI'),]
+    # -- organise lines:
+    lines = {}
+    for l in datal:
+        if l[1] in lines:
+            lines[l[1]].append(l[0])
+        else:
+            lines[l[1]] = [l[0]]
+    if onlySpectrum:
+        for k in lines.keys():
+            plt.plot(lines[k], 1.1*np.ones(len(lines[k])), '|k')
+            for x in lines[k]:
+                plt.text(x, 1.1, k, ha='center', va='bottom')
 
     plt.legend(loc='upper left', fontsize=5)
     plt.hlines(1, wlmin, wlmax, linestyle='dotted')
@@ -736,7 +803,7 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
                  linestyle='steps')
 
     if onlySpectrum:
-        plt.legend(loc='lower center', fontsize=11, ncol=10)
+        plt.legend(loc='lower center', fontsize=6, ncol=10)
         plt.xlabel('wavelength (um)')
         plt.xlim(wlmin, wlmax)
         plt.ylim(0, 1.05*tmp[w].max())
@@ -748,6 +815,8 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     if filt:
         import d4
     # -- V2 and visPHI ----
+    r['VIS band'] = {}
+    r['dVIS band'] = {}
     r['V2 band'] = {}
     r['dV2 band'] = {}
     r['dPHI band'] = {}
@@ -755,58 +824,62 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
     r['dCP band'] = {}
 
     if not model is '':
+        rm['VIS band'] = {}
+        rm['dVIS band'] = {}
         rm['V2 band'] = {}
         rm['dV2 band'] = {}
         rm['dPHI band'] = {}
         rm['CP band'] = {}
         rm['dCP band'] = {}
 
-    for i,B in enumerate(r['V2'].keys()):
+    for i,B in enumerate(r[vis].keys()):
         if withdPhi:
             axv = plt.subplot(6,3,3+3*i, sharex=ax)
         else:
             axv = plt.subplot(6,2,2+2*i, sharex=ax)
 
         if i==0:
-            plt.title('V2')
+            if visamp:
+                plt.title('VISAMP')
+            else:
+                plt.title(r'V$^2$')
 
         # -- filter negative measurements:
-        for j in np.where(r['V2'][B]<=0)[0]:
-            r['V2'][B][j] = np.median(r['V2'][B][max(j-7, 0):
-                                                min(j+7, len(r['V2'][B])-1)])
+        for j in np.where(r[vis][B]<=0)[0]:
+            r[vis][B][j] = np.median(r[vis][B][max(j-7, 0):
+                                                min(j+7, len(r[vis][B])-1)])
 
         filtV = np.linspace(1,0,8)**0.5
         filtO = 16
         if r['SPEC RES']=='HIGH' and filt:
             print('--smoothing--')
-            spr = r['V2'][B][w]
+            spr = r[vis][B][w]
             spr = removenans(rm['wl'][w], spr)
             # -- sigma clipping
             #tmp = slidingOp(r['wl'][w], spr, 0.05)
             #w_ = np.where(np.abs(spr-tmp['median'])>3*tmp['1sigma'])
             #spr[w_] = tmp['median'][w_]
             plt.plot(r['wl'][w], d4.filter1D(spr, filtV, order=filtO), '-k', alpha=0.8, linewidth=1)
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.3, linewidth=1,label=B)
+            plt.plot(r['wl'][w], r[vis][B][w], '-k', alpha=0.3, linewidth=1,label=B)
             if not model is '':
-                plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+                plt.plot(rm['wl'][w], rm[vis][B][w], '-r', alpha=0.5, linewidth=1,
                          linestyle='steps')
         else:
-            plt.plot(r['wl'][w], r['V2'][B][w], '-k', alpha=0.5, linewidth=1,label=B,
+            plt.plot(r['wl'][w], r[vis][B][w], '-k', alpha=0.5, linewidth=1,label=B,
                      linestyle='steps')
 
-            r['V2 band'][B] = r['V2'][B][w]
+            r[vis+' band'][B] = r[vis][B][w]
             if computeDiff:
-                cc = nanpolyfit(r['wl'][wc],r['V2'][B][wc],1)
-                r['dV2 band'][B] = r['V2'][B][w]/np.polyval(cc, r['wl'][w])
+                cc = nanpolyfit(r['wl'][wc],r[vis][B][wc],1)
+                r['d'+vis+' band'][B] = r[vis][B][w]/np.polyval(cc, r['wl'][w])
         if not model is '':
-            plt.plot(rm['wl'][w], rm['V2'][B][w], '-r', alpha=0.5, linewidth=1,
+            plt.plot(rm['wl'][w], rm[vis][B][w], '-r', alpha=0.5, linewidth=1,
                      linestyle='steps')
 
-
-        for k in list(lines.keys()):
-            plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
-                       linestyle='dashed')
-        tmp = getYlim(r['V2'][B][w])
+        # for k in list(lines.keys()):
+        #     plt.vlines(lines[k][0], 0, 2*plt.ylim()[1], color=lines[k][1],
+        #                linestyle='dashed')
+        tmp = getYlim(r[vis][B][w])
         plt.ylim(max(tmp[0], 0), tmp[1])
         plt.legend(loc='upper left', fontsize=7, ncol=1)
         axv.xaxis.grid()
@@ -854,9 +927,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
             plt.ylim(getYlim(r['VISPHI'][B][w]- np.polyval(cc, r['wl'][w])))
 
             plt.hlines(0, wlmin, wlmax, linestyle='dotted')
-            for k in list(lines.keys()):
-                plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
-                           linestyle='dashed')
+            # for k in list(lines.keys()):
+            #     plt.vlines(lines[k][0], -90, 90, color=lines[k][1],
+            #                linestyle='dashed')
             plt.legend(loc='upper left', fontsize=7, ncol=1)
             axp.xaxis.grid()
     axv.set_xlabel('wavelength (um)')
@@ -916,9 +989,9 @@ def plotGravi(filename, insname='auto_SC', wlmin=None, wlmax=None, filt=False,
 
         plt.ylim(getYlim(tmp[w]))
         plt.hlines(0, wlmin, wlmax, linestyle='dotted')
-        for k in list(lines.keys()):
-            plt.vlines(lines[k][0], -150 , 150, color=lines[k][1],
-                       linestyle='dashed')
+        # for k in list(lines.keys()):
+        #     plt.vlines(lines[k][0], -150 , 150, color=lines[k][1],
+        #                linestyle='dashed')
 
         axx.xaxis.grid()
         plt.legend(loc='upper left', fontsize=7, ncol=1)
@@ -1001,7 +1074,6 @@ class guiPlot(tkinter.Frame):
         files = [x for x in files if x.endswith('.fits')]
         # KLUDGE!
         files = [x for x in files if not x.startswith('r.AMBER')]
-
         self.checkDir = len(files)
         N = self.widthProgressBar
         for i, f in enumerate(files):
@@ -1017,6 +1089,7 @@ class guiPlot(tkinter.Frame):
                     h[0].header['INSTRUME']!='GRAVITY':
                 h.close()
                 continue
+
             if 'MJD-OBS' in h[0].header:
                 mjdobs.append(h[0].header['MJD-OBS'])
             else:
@@ -1053,21 +1126,26 @@ class guiPlot(tkinter.Frame):
 
         bo = {'fill':'both', 'padx':1, 'pady':1, 'side':'left'}
 
-        b = tkinter.Button(self.actFrame, text='Sp, CP, dPhi, V2', font=self.font,
+        b = tkinter.Button(self.actFrame, text='Sp, CP, dPhi, V', font=self.font,
                            command = self.quickViewAll)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        b = tkinter.Button(self.actFrame, text='CP, V2', font=self.font,
+        b = tkinter.Button(self.actFrame, text='CP, V', font=self.font,
                            command = self.quickViewCPV2)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
-        b = tkinter.Button(self.actFrame, text='V2(B)', font=self.font,
+        b = tkinter.Button(self.actFrame, text='V(B)', font=self.font,
                            command = self.quickViewV2)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
 
         b = tkinter.Button(self.actFrame, text='Spectrum',  font=self.font,
                            command= self.quickViewSpctr)
         b.pack(**bo); b.config(bg=_gray80, fg=_myblue)
+
+        self.vis = tkinter.StringVar()
+        self.vis.set('VIS') # default value
+        b = tkinter.OptionMenu(self.actFrame, self.vis, 'VIS', 'V2')
+        b.pack(**bo); b.config(bg=_gray80, fg=_myorange)
 
         self.spectro = tkinter.StringVar()
         self.spectro.set('SC') # default value
@@ -1096,6 +1174,7 @@ class guiPlot(tkinter.Frame):
 
         modes = [('Full',  'None None'),
                  #('High SNR',  '2.05 2.42'),
+                 #('Brd 1.945', '%.4f %.4f'%(1.9451-0.02, 1.9451+0.02)),
                  ('HeI 2.058', '2.038 2.078'),
                  ('FeII 2.089', '2.074 2.104'), # Warm and dense CSE https://arxiv.org/pdf/1408.6658.pdf sec 3.2.1
                  ('HeI 2.112', '2.0926 2.1326'),
@@ -1172,7 +1251,6 @@ class guiPlot(tkinter.Frame):
 
             b = tkinter.Label(self.exportFrame, text='export to binary file:',
                               bg=_gray30, fg=_gray80, font=self.font)
-
             b.pack(**bo)
 
         self.makeFileFrame()
@@ -1183,7 +1261,7 @@ class guiPlot(tkinter.Frame):
         tmp = len([f for f in os.listdir(self.directory) if f.endswith('fits')])
         if tmp!=self.checkDir:
             if tkinter.messagebox.askyesno('GRAVIQL',
-                                     'the directory has changed, do you want to update the file list?'):
+                    'the directory has changed, do you want to update the file list?'):
                 self.makeFileFrame()
         self.listFrame.after(60000, self.tick)
         return
@@ -1262,6 +1340,11 @@ class guiPlot(tkinter.Frame):
             print('|'+'='*n+' '*(N-n-1)+'|')
             key = os.path.join(self.directory, fi)
             f = fits.open(key)
+            if 'INSTRUME' in f[0].header and \
+                    f[0].header['INSTRUME']!='GRAVITY':
+                f.close()
+                continue
+
             self.listAllFiles.append(key)
             self.checkList[key] = tkinter.IntVar()
 
@@ -1300,8 +1383,12 @@ class guiPlot(tkinter.Frame):
             dit = f[0].header['ESO DET2 SEQ1 DIT']
             baseline = '-'.join([f[0].header['ESO ISS CONF STATION%d'%i] for i in [1,2,3,4]])
 
-            lst = f[0].header['LST']/3600.
+            try:
+                lst = f[0].header['LST']/3600.
+            except:
+                lst = 0.0
             lst ='%02d:%02.0f'%(int(lst), 60*(lst%1))
+
             dit = f[0].header['ESO DET2 SEQ1 DIT']
             dit = '%2.0f'%dit if dit>1 else ('%2.1f'%dit)[1:]
             tau0 = '%2.0f'%tau0 if tau0>1 else ('%2.1f'%tau0)[1:]
@@ -1402,7 +1489,7 @@ class guiPlot(tkinter.Frame):
         test = plotGravi(self.filename, v2b=True, model=self.modelStr.get(),
                         insname='auto_'+self.spectro.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
-                        **self.plot_opt)
+                        visamp=self.vis.get()=='VIS', **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
             self.modelStr.set(test)
@@ -1419,7 +1506,7 @@ class guiPlot(tkinter.Frame):
         test = plotGravi(self.filename, insname='auto_'+self.spectro.get(),
                         model=self.modelStr.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
-                        withdPhi = True,
+                        withdPhi = True, visamp=self.vis.get()=='VIS',
                         **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
@@ -1437,7 +1524,7 @@ class guiPlot(tkinter.Frame):
         test = plotGravi(self.filename, insname='auto_'+self.spectro.get(),
                         model=self.modelStr.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
-                        withdPhi = False,
+                        withdPhi = False, visamp=self.vis.get()=='VIS',
                         **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
@@ -1455,7 +1542,7 @@ class guiPlot(tkinter.Frame):
         test = plotGravi(self.filename, onlySpectrum=True, model=self.modelStr.get(),
                         insname='auto_'+self.spectro.get(), filt=self.smooth,
                         exportFilename='' if not self.export else self.exportStr.get(),
-                         **self.plot_opt)
+                        visamp=self.vis.get()=='VIS', **self.plot_opt)
         #print 'TEST:', test
         if isinstance(test, str):
             self.modelStr.set(test)
