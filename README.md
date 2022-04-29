@@ -1,3 +1,6 @@
+
+> This tool is no longer maintained please use [PMOIRED](https://github.com/amerand/PMOIRED) instead.
+
 # [VLTI/GRAVITY](https://www.eso.org/sci/facilities/paranal/instruments/gravity.html) reduced and calibrated data Quick Look
 
 A Python 3 Tkinter GUI aimed at visualizing VLTI/GRAVITY reduced and calibrated data by the [GRAVITY pipeline](https://www.eso.org/sci/software/pipelines/gravity/gravity-pipe-recipes.html) version 0.9.7 and above.
